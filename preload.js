@@ -10,4 +10,6 @@ contextBridge.exposeInMainWorld('crumby', {
   open: (id) => ipcRenderer.invoke('crumby:open', id),
   itemMenu: (id, prot) => ipcRenderer.invoke('crumby:itemMenu', id, prot),
   onEsc: (fn) => ipcRenderer.on('crumby:esc', () => fn()),
+  dragIn: (positions) => ipcRenderer.send('crumby:dragIn', positions),
+  onAdded: (fn) => ipcRenderer.on('crumby:added', (e, items) => fn(items)),
 });

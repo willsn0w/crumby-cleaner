@@ -3,7 +3,7 @@
 # Crumby
 
 > [!NOTE]
-> **Versão 1.3 — já está bastante funcional.** O Crumby limpa a área de trabalho de verdade (tudo vai para a Lixeira do Windows), aparece no clique direito da área de trabalho e fica rodando na bandeja do sistema. Ainda pode ter arestas no Windows: se algo sumir, confira a Lixeira.
+> **Versão 1.4 — já está bastante funcional.** O Crumby limpa a área de trabalho de verdade (tudo vai para a Lixeira do Windows), aparece no clique direito da área de trabalho e fica rodando na bandeja do sistema. Ainda pode ter arestas no Windows: se algo sumir, confira a Lixeira.
 
 Um robô aspirador que limpa a sua área de trabalho do Windows de verdade. Ele sai da base, mapeia a tela com um laser, recolhe os ícones um por um e **cada ícone que ele engole vai para a Lixeira do Windows**. Volta para a base quando o compartimento enche, se esvazia e termina com tudo limpo.
 
@@ -36,7 +36,9 @@ Quando você fecha a janela de limpeza (Esc, Cancel ou a bolinha vermelha), o Cr
 - **Arquivo grande:** para, treme e mostra *Big file. Straining…*
 - **Bin cheio:** volta, entra de ré na base e se esvazia (*Self-emptying*), depois retoma.
 - **Bateria:** descarrega andando e recarrega na base.
-- **Ícones idênticos aos do Windows:** antes de esconder os ícones reais, o Crumby fotografa a área de trabalho com e sem eles e usa o recorte exato de cada um (imagem, tamanho, miniatura, setinha de atalho e nome). Para a foto sair limpa, ele minimiza as janelas abertas ao começar e as restaura ao fechar.
+- **Ícones idênticos aos do Windows:** ao começar, o Crumby fotografa a área de trabalho com e sem os ícones e usa o recorte exato de cada um (imagem, tamanho, miniatura, setinha de atalho e nome). Para a foto sair limpa, ele minimiza as janelas abertas ao começar e as restaura ao fechar.
+- **A área de trabalho real continua viva:** durante a limpeza, o Crumby cobre a tela com a foto do papel de parede, e os ícones reais do Windows continuam no lugar por baixo (só somem por uma fração de segundo no começo, para a foto). Assim o Windows não perde as posições dos ícones.
+- **Arraste arquivos para a área de trabalho com o Crumby aberto:** o Crumby deixa o arrasto passar para o Windows, que recebe o arquivo no lugar exato onde você soltou, e o ícone novo aparece ali na hora.
 - **Use os ícones durante a limpeza:** clique para selecionar, duplo clique para abrir, clique direito para *Abrir*, *Mostrar na pasta* ou *Não limpar este item*, e arraste para mudar de lugar. Ao fechar, os ícones reais ficam onde você os deixou. O robô não pega um item que você está segurando ou acabou de selecionar.
 - **Interação:** arraste o robô com o mouse, ou arremesse um ícone nele (*Ouch.*).
 - **Lixeira de verdade:** cada ícone engolido vai para a Lixeira do Windows na hora; se o Windows recusar, o robô cospe o arquivo de volta (*Can't recycle…*).
@@ -47,6 +49,11 @@ Quando você fecha a janela de limpeza (Esc, Cancel ou a bolinha vermelha), o Cr
 - **Sons** sintetizados (escaneamento, motor, sucção, bipes, esvaziamento), com botão de mudo.
 
 ## Versões
+
+### 1.4
+- Corrigido: não dava para arrastar arquivos novos para a área de trabalho com o Crumby aberto. Agora o Windows recebe o arquivo onde você soltou e o Crumby mostra o ícone novo no mesmo lugar.
+- Corrigido: depois de fechar o Crumby, arquivos arrastados para a área de trabalho iam parar no canto superior esquerdo. Os ícones reais não ficam mais escondidos durante a limpeza; o Crumby mostra uma foto do papel de parede por cima.
+- Antes de um arquivo cair na área de trabalho, os ícones reais vão para onde você os deixou no Crumby, para nada ser solto dentro da pasta errada.
 
 ### 1.3.2
 - Corrigido: os ícones mudavam de tamanho, de imagem e de nome durante a limpeza. Agora são cópias exatas dos ícones do Windows.

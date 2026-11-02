@@ -5,6 +5,7 @@
 #   hide     -> hides the desktop icon layer
 #   show     -> shows it again
 #   move<TAB>name<TAB>x<TAB>y -> moves that real desktop icon to position x,y
+#   mouse    -> 1 if the left mouse button is down, else 0
 #   minall   -> minimizes all windows (so the desktop is in view)
 #   undomin  -> restores them
 # Every reply ends with a line "<<END>>".
@@ -31,6 +32,11 @@ public static class CrumbyDesk {
   [DllImport("kernel32.dll")] static extern bool WriteProcessMemory(IntPtr p, IntPtr addr, byte[] buf, UIntPtr size, out UIntPtr n);
   [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
   [DllImport("user32.dll")] static extern int GetSystemMetrics(int i);
+  [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
+  public static bool LeftButtonDown() {
+    int key = GetSystemMetrics(23) != 0 ? 0x02 : 0x01; // swapped buttons
+    return (GetAsyncKeyState(key) & 0x8000) != 0;
+  }
   public delegate bool EnumProc(IntPtr h, IntPtr l);
   [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
 
@@ -147,6 +153,7 @@ try {
         'scan' { [Console]::Out.Write([CrumbyDesk]::Scan()) }
         'hide' { [CrumbyDesk]::Show($false) }
         'show' { [CrumbyDesk]::Show($true) }
+        'mouse' { if ([CrumbyDesk]::LeftButtonDown()) { [Console]::Out.WriteLine('1') } else { [Console]::Out.WriteLine('0') } }
         'move' { if ($parts.Length -ge 4) { [void][CrumbyDesk]::Move($parts[1], [int]$parts[2], [int]$parts[3]) } }
         'minall' {
           if ($shellApp -eq $null) { $shellApp = New-Object -ComObject Shell.Application }

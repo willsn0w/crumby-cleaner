@@ -183,32 +183,81 @@ function cutSprite(A, B, rect, icon) {
 // item bookkeeping for moving the real icons afterwards
 let itemMeta = [];
 
-async function collectItems(workArea, display, { capture = false } = {}) {
-  const scale = display.scaleFactor;
-  const files = await listDesktopFiles();
-  const scanText = await helperCmd('scan');
+// the wallpaper without icons (B) is kept for the whole session: it is the overlay's background,
+// so the real icons can stay alive underneath (Windows keeps track of positions and drops normally)
+let wallpaperShot = null;
+
+function looksBlack(A) {
+  let black = 0, n = 0;
+  for (let k = 0; k < 400; k++) {
+    const x = Math.floor(Math.random() * A.w), y = Math.floor(Math.random() * A.h), i = (y * A.w + x) * 4;
+    n++; if (A.buf[i] === 0 && A.buf[i + 1] === 0 && A.buf[i + 2] === 0) black++;
+  }
+  return black / n > 0.9;
+}
+
+// screenshot with the icons, never including our own window
+async function grabWithIcons(display) {
+  let A = await grabScreen(display);
+  if (A && win && win.isVisible() && looksBlack(A)) { // capture-exclusion not supported on this Windows
+    win.hide(); await new Promise((r) => setTimeout(r, 220));
+    A = await grabScreen(display);
+    if (win) win.show();
+  }
+  return A;
+}
+
+function backgroundFrom(B, display, workArea) {
+  const s = display.scaleFactor * B.k;
+  const l = Math.round((workArea.x - display.bounds.x) * s), t = Math.round((workArea.y - display.bounds.y) * s);
+  const w = Math.min(B.w - l, Math.round(workArea.width * s)), h = Math.min(B.h - t, Math.round(workArea.height * s));
+  const out = Buffer.alloc(w * h * 4);
+  for (let y = 0; y < h; y++) B.buf.copy(out, y * w * 4, ((t + y) * B.w + l) * 4, ((t + y) * B.w + l + w) * 4);
+  return nativeImage.createFromBitmap(out, { width: w, height: h }).toDataURL();
+}
+
+function parseScan(text) {
   let vx = 0, vy = 0;
   const rows = [];
-  for (const line of scanText.split(/\r?\n/)) {
+  for (const line of text.split(/\r?\n/)) {
     const p = line.split('\t');
     if (p[0] === 'VS') { vx = +p[1] || 0; vy = +p[2] || 0; }
     else if (p[0] === 'IT' && p.length >= 13) {
       rows.push({ idx: +p[1], pos: [+p[2], +p[3]], icon: p.slice(4, 8).map(Number), bounds: p.slice(8, 12).map(Number), name: p.slice(12).join('\t') });
     }
   }
+  return { vx, vy, rows };
+}
 
-  // photographs for exact copies (icons visible -> hide -> wallpaper only)
+// capture: 'full' = photograph with + without icons (session start)
+//          'icons' = only re-photograph the icons (wallpaper kept)       | false = no photos
+// onlyNew: add just the icons that appeared since (dropped files), keeping current ids
+async function collectItems(workArea, display, { capture = false, onlyNew = false } = {}) {
+  const scale = display.scaleFactor;
+  const files = await listDesktopFiles();
+  const { vx, vy, rows: allRows } = parseScan(await helperCmd('scan'));
+  const known = new Set(itemMeta.map((m) => m.name));
+  const rows = onlyNew ? allRows.filter((r) => !known.has(r.name)) : allRows;
+  if (onlyNew && !rows.length) return [];
+
   let A = null, B = null;
-  if (capture && rows.length) {
+  if (capture === 'full' && rows.length) {
     A = await grabScreen(display);
-    await helperCmd('hide', 5000);
+    await helperCmd('hide', 5000);                // a split second, just for the wallpaper photo
     await new Promise((r) => setTimeout(r, 350));
     B = A ? await grabScreen(display) : null;
+    await helperCmd('show', 5000);                // real icons back right away
     if (!B || B.w !== A.w || B.h !== A.h) A = B = null;
+    wallpaperShot = B;
+  } else if (capture === 'icons' && rows.length && wallpaperShot) {
+    A = await grabWithIcons(display);
+    B = wallpaperShot;
+    if (!A || A.w !== B.w || A.h !== B.h) A = B = null;
   }
 
   // match listview labels to files (labels may hide extensions; .lnk/.url never show them)
-  const pool = files.slice();
+  const taken = new Set(onlyNew ? itemPaths.filter(Boolean) : []);
+  const pool = files.filter((f) => !taken.has(f.path));
   const take = (label) => {
     const lo = label.toLowerCase();
     let i = pool.findIndex((f) => f.name.toLowerCase() === lo);
@@ -226,7 +275,7 @@ async function collectItems(workArea, display, { capture = false } = {}) {
     y: ((r.icon[1] + r.icon[3]) / 2 + oy) / scale - (workArea.y - display.bounds.y),
   }));
   if (mapped.some((m) => onScreen(m.x, m.y))) {
-    // icons on other monitors are left alone (they still hide/return with the desktop)
+    // icons on other monitors are left alone
     for (const m of mapped) {
       if (!onScreen(m.x, m.y)) continue;
       const f = take(m.r.name);
@@ -246,7 +295,7 @@ async function collectItems(workArea, display, { capture = false } = {}) {
       items.push({ name: m.r.name, file: f, x: m.x, y: m.y, pos: m.r.pos, sprite,
         iconSize: Math.max(24, Math.min(96, (m.r.icon[2] - m.r.icon[0]) / scale)) });
     }
-  } else {
+  } else if (!onlyNew) {
     // fallback: Windows default arrangement (column-major from top-left)
     const cellW = 76, cellH = 100, rowsPer = Math.max(1, Math.floor((workArea.height - 10) / cellH));
     files.forEach((f, i) => {
@@ -256,13 +305,13 @@ async function collectItems(workArea, display, { capture = false } = {}) {
   }
 
   const out = [];
-  itemPaths = [];
-  itemMeta = [];
+  if (!onlyNew) { itemPaths = []; itemMeta = []; }
   for (const it of items) {
+    const id = itemPaths.length;
     itemPaths.push(it.file ? it.file.path : null);
     itemMeta.push({ name: it.name, pos: it.pos || null, x: it.x, y: it.y, scale });
     out.push({
-      id: out.length,
+      id,
       canTrash: !!it.file,
       name: it.name,
       x: it.x, y: it.y, iconSize: it.iconSize,
@@ -273,6 +322,34 @@ async function collectItems(workArea, display, { capture = false } = {}) {
     });
   }
   return out;
+}
+
+// ---------- files dragged onto the desktop while Crumby is open ----------
+// The overlay steps aside (click-through) so Windows itself receives the drop, exactly where the
+// user lets go. Once the mouse button is released, the new icon is photographed and added.
+let passthrough = false;
+async function letDropThrough(positions) {
+  if (!win || passthrough) return;
+  passthrough = true;
+  win.setIgnoreMouseEvents(true);
+  // real icons go where the user sees them first, so nothing gets dropped into the wrong folder
+  await applyMoves(positions);
+  const t0 = Date.now();
+  let sawDown = false;
+  while (Date.now() - t0 < 30000) {
+    await new Promise((r) => setTimeout(r, 120));
+    const down = (await helperCmd('mouse', 1500)).trim().startsWith('1');
+    if (down) sawDown = true;
+    else if (sawDown || Date.now() - t0 > 1500) break;
+  }
+  if (win) win.setIgnoreMouseEvents(false);
+  passthrough = false;
+  // Explorer needs a moment to create the icon(s)
+  for (let tries = 0; tries < 8 && win && session; tries++) {
+    await new Promise((r) => setTimeout(r, 350));
+    const added = await collectItems(session.wa, screen.getPrimaryDisplay(), { capture: 'icons', onlyNew: true });
+    if (added.length) { if (win) win.webContents.send('crumby:added', added); break; }
+  }
 }
 
 // apply the overlay positions of icons the user (or the vacuum) moved to the real desktop
@@ -368,7 +445,10 @@ async function startSession() {
   win.on('closed', () => { win = null; endSession(); });
 
   if (helper) { await helperCmd('minall', 4000); await new Promise((r) => setTimeout(r, 650)); } // bring the desktop into view
-  session.items = await collectItems(wa, display, { capture: true });
+  itemMeta = []; itemPaths = []; wallpaperShot = null;
+  session.items = await collectItems(wa, display, { capture: 'full' });
+  session.bg = wallpaperShot ? backgroundFrom(wallpaperShot, display, wa) : null;
+  try { win.setContentProtection(true); } catch (e) {} // our window never shows up in our own screenshots
   await win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   globalShortcut.register('Escape', () => { if (win) win.webContents.send('crumby:esc'); else endSession(); });
   updateTrayMenu();
@@ -396,13 +476,17 @@ ipcMain.handle('crumby:init', () => ({
   items: session ? session.items : [],
   width: session ? session.wa.width : 0, height: session ? session.wa.height : 0,
   dock: settings.dock || null,
+  bg: session ? session.bg : null,
 }));
 ipcMain.on('crumby:ready', async () => {
   if (!win) return;
   win.show();
   win.focus();
-  await helperCmd('hide', 5000); // real icons vanish the moment our copies are on screen
+  // with a wallpaper photo as background the real icons stay alive underneath;
+  // without one (photo failed) they have to be hidden instead
+  if (!session || !session.bg) await helperCmd('hide', 5000);
 });
+ipcMain.on('crumby:dragIn', (e, positions) => letDropThrough(positions));
 ipcMain.on('crumby:quit', (e, moves) => endSession(moves));
 ipcMain.handle('crumby:trash', (e, id) => trashItem(id));
 // "Start" after a run: look at the desktop again (new files saved since then)
@@ -412,10 +496,8 @@ ipcMain.handle('crumby:rescan', async (e, moves) => {
   // put moved icons where the user left them, then photograph the desktop again without our window
   await applyMoves(moves);
   trashed = new Set();
-  const wasVisible = win && win.isVisible();
-  if (wasVisible) { win.hide(); await helperCmd('show', 3000); await new Promise((r) => setTimeout(r, 300)); }
-  session.items = await collectItems(session.wa, display, { capture: true });
-  if (wasVisible && win) { win.show(); win.focus(); }
+  itemMeta = []; itemPaths = [];
+  session.items = await collectItems(session.wa, display, { capture: session.bg ? 'icons' : false });
   return { items: session.items };
 });
 ipcMain.handle('crumby:open', async (e, id) => {

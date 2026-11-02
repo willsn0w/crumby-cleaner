@@ -245,7 +245,19 @@ function mockItems() {
 }
 
 // (re)load the desktop icons onto the floor
-async function loadItems(raw) {
+async function loadItems(raw, append = false) {
+  if (append) { // files dropped onto the desktop while Crumby is open
+    const N = Math.max(1, S.items.length + raw.length);
+    for (const r of raw) {
+      const it = await makeItem(r, N, Math.max(150e6, ...S.items.filter((i) => i.big).map((i) => i.size)));
+      it.revealed = S.mapped || S.state !== 'mapping'; it.glow = 1;
+      S.items.push(it);
+      if (!it.fixed) S.total++;
+    }
+    $('countOf').textContent = `of ${S.total} items`;
+    if (S.state === 'confirm') refreshConfirm();
+    return;
+  }
   S.items = [];
   S.totalBytes = raw.reduce((a, b) => a + (b.size || 0), 0);
   const sizes = raw.map((r) => r.size || 0).sort((a, b) => b - a);
@@ -253,7 +265,21 @@ async function loadItems(raw) {
   const N = raw.length;
   S.binCap = N >= 6 ? 0.72 : 1.01;
 
-  for (const r of raw) {
+  for (const r of raw) S.items.push(await makeItem(r, N, bigCut));
+  S.total = S.items.filter((i) => !i.fixed).length;
+  $('countOf').textContent = `of ${S.total} items`;
+  refreshConfirm();
+}
+
+function refreshConfirm() {
+  const tb = S.items.filter((i) => !i.fixed && i.st !== 'gone').reduce((a, i) => a + i.size, 0);
+  $('confirmText').innerHTML = S.total
+    ? `<b>${S.total} ${S.total === 1 ? 'item' : 'items'}</b> (${fmtBytes(tb)}) will be moved to the <b>Recycle Bin</b>. You can restore them from there.`
+    : 'Your desktop is already clean.';
+  $('startBtn').disabled = !S.total;
+}
+
+async function makeItem(r, N, bigCut) {
     const icon = r.icon ? await loadImg(r.icon) : null;
     const it = {
       id: r.id != null ? r.id : S.items.length, name: r.name, kind: r.kind, size: r.size || 0, iconSize: r.iconSize || 48,
@@ -270,21 +296,14 @@ async function loadItems(raw) {
     it.sprite = shot
       ? { canvas: shot, w: r.sprite.w, h: r.sprite.h, ax: r.sprite.ax, ay: r.sprite.ay } // pixel-exact copy of the real icon + name
       : itemSprite(it, icon || genericIcon(it.kind, it.iconSize));
-    S.items.push(it);
-  }
-  S.total = S.items.filter((i) => !i.fixed).length;
-  $('countOf').textContent = `of ${S.total} items`;
-  const tb = S.items.filter((i) => !i.fixed).reduce((a, i) => a + i.size, 0);
-  $('confirmText').innerHTML = S.total
-    ? `<b>${S.total} ${S.total === 1 ? 'item' : 'items'}</b> (${fmtBytes(tb)}) will be moved to the <b>Recycle Bin</b>. You can restore them from there.`
-    : 'Your desktop is already clean.';
-  $('startBtn').disabled = !S.total;
+    return it;
 }
 
 async function setup() {
   if (PREVIEW) document.body.classList.add('preview');
   resize();
   const data = PREVIEW ? { items: mockItems() } : await window.crumby.init();
+  if (data.bg) document.body.style.background = `#000 url("${data.bg}") 0 0 / 100% 100% no-repeat`;
 
   const [rImg, dImg] = await Promise.all([loadImg('assets/robot.svg'), loadImg('assets/dock.svg')]);
   robotSprite = raster(rImg, R * 2, R * 2);
@@ -840,6 +859,15 @@ function bindUI() {
   addEventListener('resize', resize);
   addEventListener('keydown', (e) => { if (e.key === 'Escape') quit(); });
   if (!PREVIEW && window.crumby.onEsc) window.crumby.onEsc(quit);
+  // a file dragged in from another window: step aside so the real desktop receives it
+  addEventListener('dragenter', (e) => {
+    if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes('Files')) return;
+    e.preventDefault();
+    if (!PREVIEW) window.crumby.dragIn(currentPositions());
+  });
+  addEventListener('dragover', (e) => e.preventDefault());
+  addEventListener('drop', (e) => e.preventDefault()); // never navigate to a dropped file
+  if (!PREVIEW && window.crumby.onAdded) window.crumby.onAdded((items) => loadItems(items, true));
   $('close').addEventListener('click', quit);
   $('startBtn').addEventListener('click', () => { Snd.init(); setState('boot'); S.stateT = 1.0; });
   $('cancelBtn').addEventListener('click', quit);
