@@ -2,8 +2,8 @@
 
 # Crumby
 
-> [!WARNING]
-> **Versão 1.2 (alpha) — ainda em testes.** A partir desta versão o Crumby **move os arquivos da área de trabalho para a Lixeira do Windows de verdade**. Ainda não foi testado a fundo no Windows: use por sua conta e risco e confira a Lixeira se algo sumir.
+> [!NOTE]
+> **Versão 1.3 — já está bastante funcional.** O Crumby limpa a área de trabalho de verdade (tudo vai para a Lixeira do Windows), aparece no clique direito da área de trabalho e fica rodando na bandeja do sistema. Ainda pode ter arestas no Windows: se algo sumir, confira a Lixeira.
 
 Um robô aspirador que limpa a sua área de trabalho do Windows de verdade. Ele sai da base, mapeia a tela com um laser, recolhe os ícones um por um e **cada ícone que ele engole vai para a Lixeira do Windows**. Volta para a base quando o compartimento enche, se esvazia e termina com tudo limpo.
 
@@ -17,9 +17,16 @@ Como o executável não é assinado, o Windows pode mostrar o aviso do SmartScre
 
 ## Menu do clique direito
 
-Depois de abrir o `Crumby.exe` uma vez, aparece a opção **"Limpar a área de trabalho com Crumby"** ao clicar com o botão direito num espaço vazio da área de trabalho. No Windows 11 ela fica em **Mostrar mais opções** (ou Shift + F10).
+Depois de abrir o `Crumby.exe` uma vez, aparece a opção **"Limpar com o Crumby"** ao clicar com o botão direito num espaço vazio da área de trabalho. No Windows 11 ela fica em **Mostrar mais opções** (ou Shift + F10).
 
-O registro é só para o seu usuário (não precisa de administrador). Para remover a opção do menu, rode `Crumby.exe --uninstall`.
+O registro é só para o seu usuário (não precisa de administrador). Para remover a opção do menu e a inicialização com o Windows, rode `Crumby.exe --uninstall`.
+
+## Bandeja do sistema
+
+Quando você fecha a janela de limpeza (Esc, Cancel ou a bolinha vermelha), o Crumby continua rodando em plano de fundo, com o ícone dele na bandeja do sistema (perto do relógio; pode estar escondido na setinha **^**).
+
+- **Clique no ícone:** abre uma nova limpeza.
+- **Clique direito no ícone:** *Limpar com o Crumby*, *Iniciar com o Windows* (ligado por padrão; ele inicia só na bandeja, sem abrir a limpeza) e *Sair do Crumby*.
 
 ## O que ele faz
 
@@ -32,10 +39,19 @@ O registro é só para o seu usuário (não precisa de administrador). Para remo
 - **Interação:** arraste o robô com o mouse, ou arremesse um ícone nele (*Ouch.*).
 - **Lixeira de verdade:** cada ícone engolido vai para a Lixeira do Windows na hora; se o Windows recusar, o robô cospe o arquivo de volta (*Can't recycle…*).
 - **Confirmação:** antes de começar, o painel mostra quantos itens e quantos GB irão para a Lixeira, com **Start cleaning** e **Cancel**.
+- **Base arrastável:** arraste a base para qualquer lugar da tela (ela nunca entra embaixo da barra de tarefas). Se o robô estiver estacionado, vai junto; o Crumby lembra a posição na próxima vez.
+- **Plano de fundo:** depois de fechado, fica na bandeja do sistema, pronto para a próxima limpeza.
 - **Painel:** status, minimapa, Battery, Bin, itens, GB coletados, tempo, Pause e Stop. O Stop para o robô onde ele está e vira **Resume** para voltar a aspirar.
 - **Sons** sintetizados (escaneamento, motor, sucção, bipes, esvaziamento), com botão de mudo.
 
 ## Versões
+
+### 1.3
+- Já está bastante funcional.
+- Opção do clique direito renomeada para **"Limpar com o Crumby"**.
+- Base arrastável para qualquer lugar da tela, respeitando a barra de tarefas, com a posição lembrada entre usos.
+- Crumby fica rodando em plano de fundo na bandeja do sistema depois de fechado, com menu (*Limpar com o Crumby*, *Iniciar com o Windows*, *Sair do Crumby*).
+- Abrir de novo (pelo `.exe` ou pelo clique direito) reaproveita o Crumby que já está rodando.
 
 ### 1.2 (alpha)
 - Limpeza de verdade: os arquivos e pastas da área de trabalho vão para a Lixeira do Windows conforme o robô os engole.

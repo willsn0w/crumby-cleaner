@@ -2,9 +2,10 @@
 // Main process: finds desktop icons, hides the real ones, opens a transparent
 // overlay where the robot collects them. Every icon the robot swallows is moved
 // to the Windows Recycle Bin (shell.trashItem), so it can always be restored.
-// Also adds "Limpar a área de trabalho com Crumby" to the desktop right-click menu.
+// Adds "Limpar com o Crumby" to the desktop right-click menu and keeps running
+// in the system tray after the cleaning window is closed.
 
-const { app, BrowserWindow, ipcMain, screen, nativeImage, globalShortcut, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, nativeImage, globalShortcut, shell, dialog, Tray, Menu } = require('electron');
 const { execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -19,7 +20,6 @@ let win = null;
 let helper = null;
 let helperBuf = '';
 let helperWaiters = [];
-let restoring = false;
 
 // ---------- desktop helper (Windows only) ----------
 function startHelper() {
@@ -178,9 +178,19 @@ async function collectItems(workArea, scale) {
   return out;
 }
 
+// ---------- settings (userData/settings.json) ----------
+const SETTINGS_FILE = () => path.join(app.getPath('userData'), 'settings.json');
+let settings = {};
+function loadSettings() {
+  try { settings = JSON.parse(fs.readFileSync(SETTINGS_FILE(), 'utf8')) || {}; } catch (e) { settings = {}; }
+}
+function saveSettings() {
+  try { fs.mkdirSync(path.dirname(SETTINGS_FILE()), { recursive: true }); fs.writeFileSync(SETTINGS_FILE(), JSON.stringify(settings, null, 2)); } catch (e) {}
+}
+
 // ---------- recycle bin ----------
 let itemPaths = [];
-const trashed = new Set();
+let trashed = new Set();
 async function trashItem(id) {
   const p = itemPaths[id];
   if (!p) return { ok: false, error: 'not a file' };
@@ -196,13 +206,15 @@ async function trashItem(id) {
 
 // ---------- desktop right-click menu (per user, no admin needed) ----------
 const MENU_KEY = 'HKCU\\Software\\Classes\\DesktopBackground\\Shell\\Crumby';
+const MENU_LABEL = 'Limpar com o Crumby';
 function reg(args) {
   return new Promise((res) => execFile('reg.exe', args, { windowsHide: true }, (err) => res(!err)));
 }
 async function registerContextMenu() {
   if (process.platform !== 'win32' || !app.isPackaged) return;
   const exe = process.execPath;
-  await reg(['add', MENU_KEY, '/ve', '/d', 'Limpar a área de trabalho com Crumby', '/f']);
+  await reg(['add', MENU_KEY, '/ve', '/d', MENU_LABEL, '/f']);
+  await reg(['add', MENU_KEY, '/v', 'MUIVerb', '/d', MENU_LABEL, '/f']);
   await reg(['add', MENU_KEY, '/v', 'Icon', '/d', `"${exe}",0`, '/f']);
   await reg(['add', MENU_KEY, '/v', 'Position', '/d', 'Top', '/f']);
   await reg(['add', MENU_KEY + '\\command', '/ve', '/d', `"${exe}" --clean`, '/f']);
@@ -212,62 +224,132 @@ async function unregisterContextMenu() {
   await reg(['delete', MENU_KEY, '/f']);
 }
 
-// ---------- lifecycle ----------
-async function restoreDesktop() {
-  if (restoring) return;
-  restoring = true;
-  if (helper) {
-    await helperCmd('show', 3000);
-    try { helper.stdin.end(); } catch (e) {}
-  }
+// ---------- start with Windows (tray only) ----------
+function setStartAtLogin(on) {
+  settings.startAtLogin = !!on; saveSettings();
+  if (!app.isPackaged) return;
+  try { app.setLoginItemSettings({ openAtLogin: !!on, path: process.execPath, args: ['--background'] }); } catch (e) {}
 }
 
-async function quit() {
-  await restoreDesktop();
-  globalShortcut.unregisterAll();
-  app.exit(0);
-}
+// ---------- cleaning sessions ----------
+let session = null; // { items, wa }
+let closing = false;
 
-async function createWindow() {
+async function startSession() {
+  if (win) { win.show(); win.focus(); return; }
+  if (session) return; // already opening
+  closing = false;
   const display = screen.getPrimaryDisplay();
-  const wa = display.workArea;
-  startHelper();
+  const wa = display.workArea; // excludes the taskbar
+  session = { wa, items: [] };
+  if (!helper) startHelper();
+  trashed = new Set();
 
   win = new BrowserWindow({
     x: wa.x, y: wa.y, width: wa.width, height: wa.height,
     transparent: true, frame: false, resizable: false, movable: false,
     minimizable: false, maximizable: false, fullscreenable: false,
-    hasShadow: false, show: false, backgroundColor: '#00000000',
+    hasShadow: false, show: false, backgroundColor: '#00000000', skipTaskbar: true,
     title: 'Crumby', icon: path.join(__dirname, 'renderer', 'assets', 'icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, backgroundThrottling: false },
   });
   win.setMenu(null);
+  win.on('closed', () => { win = null; endSession(); });
 
-  const items = await collectItems(wa, display.scaleFactor);
-
-  ipcMain.handle('crumby:init', () => ({ items, width: wa.width, height: wa.height }));
-  ipcMain.on('crumby:ready', async () => {
-    win.show();
-    win.focus();
-    await helperCmd('hide', 5000); // real icons vanish the moment our copies are on screen
-  });
-  ipcMain.on('crumby:quit', () => quit());
-  ipcMain.handle('crumby:trash', (e, id) => trashItem(id));
-
+  session.items = await collectItems(wa, display.scaleFactor);
   await win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-  globalShortcut.register('Escape', () => quit());
-  win.on('closed', () => quit());
+  globalShortcut.register('Escape', () => endSession());
+  updateTrayMenu();
 }
 
+// closes the cleaning window, shows the real desktop again, keeps Crumby in the tray
+async function endSession() {
+  if (closing) return;
+  closing = true;
+  globalShortcut.unregister('Escape');
+  await helperCmd('show', 3000);
+  if (win && !win.isDestroyed()) { const w = win; win = null; w.destroy(); }
+  session = null;
+  closing = false;
+  updateTrayMenu();
+  if (tray && !settings.trayHintShown && process.platform === 'win32') {
+    settings.trayHintShown = true; saveSettings();
+    try { tray.displayBalloon({ title: 'Crumby continua por aqui', content: 'Clique no robô na bandeja para limpar de novo, ou use "Limpar com o Crumby" no clique direito da área de trabalho.', iconType: 'info' }); } catch (e) {}
+  }
+}
+
+ipcMain.handle('crumby:init', () => ({
+  items: session ? session.items : [],
+  width: session ? session.wa.width : 0, height: session ? session.wa.height : 0,
+  dock: settings.dock || null,
+}));
+ipcMain.on('crumby:ready', async () => {
+  if (!win) return;
+  win.show();
+  win.focus();
+  await helperCmd('hide', 5000); // real icons vanish the moment our copies are on screen
+});
+ipcMain.on('crumby:quit', () => endSession());
+ipcMain.handle('crumby:trash', (e, id) => trashItem(id));
+ipcMain.on('crumby:saveDock', (e, pos) => {
+  if (pos && isFinite(pos.x) && isFinite(pos.y)) { settings.dock = { x: Math.round(pos.x), y: Math.round(pos.y) }; saveSettings(); }
+});
+
+// ---------- tray ----------
+let tray = null;
+function trayIcon() {
+  const img = nativeImage.createFromPath(path.join(__dirname, 'renderer', 'assets', 'icon.png'));
+  return img.isEmpty() ? img : img.resize({ width: 16, height: 16, quality: 'best' });
+}
+function updateTrayMenu() {
+  if (!tray) return;
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: win ? 'Mostrar o Crumby' : MENU_LABEL, click: () => startSession() },
+    { type: 'separator' },
+    { label: 'Iniciar com o Windows', type: 'checkbox', checked: settings.startAtLogin !== false, click: (m) => setStartAtLogin(m.checked) },
+    { type: 'separator' },
+    { label: 'Sair do Crumby', click: () => quitApp() },
+  ]));
+}
+function createTray() {
+  try {
+    tray = new Tray(trayIcon());
+    tray.setToolTip('Crumby');
+    tray.on('click', () => startSession());
+    tray.on('double-click', () => startSession());
+    updateTrayMenu();
+  } catch (e) { tray = null; }
+}
+
+async function quitApp() {
+  await endSession();
+  globalShortcut.unregisterAll();
+  if (helper) { try { helper.stdin.end(); } catch (e) {} }
+  if (tray) { tray.destroy(); tray = null; }
+  app.exit(0);
+}
+
+// ---------- app ----------
+app.on('second-instance', (e, argv) => {
+  // right-click menu or a second double-click while Crumby lives in the tray
+  if (!argv.includes('--background')) startSession();
+});
+app.on('window-all-closed', () => { /* stay in the tray */ });
+
 app.whenReady().then(async () => {
+  loadSettings();
   if (process.argv.includes('--uninstall')) {
     await unregisterContextMenu();
-    await dialog.showMessageBox({ type: 'info', title: 'Crumby', message: 'Crumby foi removido do menu do clique direito.' });
+    try { app.setLoginItemSettings({ openAtLogin: false, path: process.execPath, args: ['--background'] }); } catch (e) {}
+    await dialog.showMessageBox({ type: 'info', title: 'Crumby', message: 'Crumby foi removido do menu do clique direito e da inicialização do Windows.' });
     app.exit(0);
     return;
   }
   registerContextMenu(); // refreshed on every launch so it always points at this copy
-  createWindow();
+  if (settings.startAtLogin === undefined) setStartAtLogin(true);
+  else setStartAtLogin(settings.startAtLogin);
+  createTray();
+  startHelper();
+  if (!process.argv.includes('--background')) startSession();
 });
-app.on('window-all-closed', () => quit());
 process.on('exit', () => { try { helper && helper.stdin.end(); } catch (e) {} });

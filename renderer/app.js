@@ -107,6 +107,13 @@ const S = {
   trail: [], drag: null, time: 0,
 };
 
+// the dock stays inside the work area (never under the taskbar) and leaves room to back in
+function clampDock() {
+  S.dock.x = clamp(S.dock.x, 0, W - DOCK_W);
+  S.dock.y = clamp(S.dock.y, R * 2 + 6, H - DOCK_H);
+}
+const ON_DOCK = ['confirm', 'boot', 'emptying', 'docked', 'charging', 'done', 'stopped'];
+const hitDock = (x, y) => x >= S.dock.x && x <= S.dock.x + DOCK_W && y >= S.dock.y && y <= S.dock.y + DOCK_H;
 const dockedPos = () => ({ x: S.dock.x + DOCK_W / 2, y: S.dock.y + 55 * DOCK_K });
 const approachPos = () => ({ x: S.dock.x + DOCK_W / 2, y: S.dock.y - R * 0.95 });
 const binPct = () => clamp(S.binLoad / S.binCap * 100, 0, 100);
@@ -248,6 +255,10 @@ async function setup() {
 
   S.dock.x = Math.round(W * 0.82 - DOCK_W / 2);
   S.dock.y = Math.round(H - DOCK_H - 4);
+  let saved = data.dock;
+  if (!saved && PREVIEW) { try { saved = JSON.parse(localStorage.getItem('crumby.dock') || 'null'); } catch (e) {} }
+  if (saved) { S.dock.x = saved.x; S.dock.y = saved.y; }
+  clampDock();
   const dp = dockedPos(); S.robot.x = dp.x; S.robot.y = dp.y;
 
   const raw = data.items || [];
@@ -816,8 +827,12 @@ function bindUI() {
   cv.addEventListener('pointerdown', (e) => {
     Snd.init();
     const x = e.clientX, y = e.clientY, r = S.robot;
-    if (S.state === 'confirm') { /* waiting for Start */ }
-    else if (Math.hypot(x - r.x, y - r.y) < R) {
+    const onRobot = Math.hypot(x - r.x, y - r.y) < R;
+    if (hitDock(x, y) && (!onRobot || S.state === 'confirm')) {
+      // move the dock (the robot rides along if it's parked on it)
+      S.drag = { kind: 'dock', dx: x - S.dock.x, dy: y - S.dock.y, carry: ON_DOCK.includes(S.state) };
+    } else if (S.state === 'confirm') { /* waiting for Start */ }
+    else if (onRobot) {
       S.drag = { kind: 'robot', dx: x - r.x, dy: y - r.y, prev: S.state };
       if (S.strain) { S.strain.st = 'floor'; S.strain.x = S.strain.sx; S.strain.y = S.strain.sy; S.strain = null; }
       setState('lifted'); S.target = null;
@@ -830,16 +845,26 @@ function bindUI() {
   cv.addEventListener('pointermove', (e) => {
     const x = e.clientX, y = e.clientY, d = S.drag;
     if (!d) {
-      const over = Math.hypot(x - S.robot.x, y - S.robot.y) < R || hitItem(x, y);
+      const over = Math.hypot(x - S.robot.x, y - S.robot.y) < R || hitDock(x, y) || hitItem(x, y);
       cv.style.cursor = over ? 'grab' : 'default';
       return;
     }
     cv.style.cursor = 'grabbing';
-    if (d.kind === 'robot') { S.robot.x = x - d.dx; S.robot.y = y - d.dy; }
+    if (d.kind === 'dock') {
+      S.dock.x = x - d.dx; S.dock.y = y - d.dy; clampDock();
+      if (d.carry) { const p = dockedPos(); S.robot.x = p.x; S.robot.y = p.y; }
+    } else if (d.kind === 'robot') { S.robot.x = x - d.dx; S.robot.y = y - d.dy; }
     else { d.it.x = x - d.dx; d.it.y = y - d.dy; d.hist.push({ x, y, t: performance.now() }); if (d.hist.length > 8) d.hist.shift(); }
   });
   const release = () => {
     const d = S.drag; if (!d) return; S.drag = null; cv.style.cursor = 'default';
+    if (d.kind === 'dock') {
+      const pos = { x: S.dock.x, y: S.dock.y };
+      if (PREVIEW) { try { localStorage.setItem('crumby.dock', JSON.stringify(pos)); } catch (e) {} }
+      else window.crumby.saveDock(pos);
+      Snd.thud();
+      return;
+    }
     if (d.kind === 'robot') {
       Snd.thud();
       const left = S.items.some((i) => i.st === 'floor' || i.st === 'held');
