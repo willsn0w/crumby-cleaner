@@ -2,6 +2,9 @@
 
 # Crumb
 
+> [!WARNING]
+> **Versão 1.0 (alpha) — ainda não está funcionando.** Este projeto está em desenvolvimento e o executável ainda não funciona corretamente no Windows. Use por sua conta e risco.
+
 Um robô aspirador que limpa a sua área de trabalho do Windows. Ele sai da base, mapeia a tela com um laser, recolhe os ícones um por um, volta para a base quando o compartimento enche, se esvazia e termina com tudo limpo.
 
 **Nenhum arquivo é movido ou apagado.** Os ícones reais só ficam escondidos enquanto o Crumb roda. Esc (ou a bolinha vermelha do painel) fecha o app e traz a área de trabalho de volta, mesmo se o app travar.
