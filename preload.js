@@ -4,4 +4,5 @@ contextBridge.exposeInMainWorld('crumby', {
   init: () => ipcRenderer.invoke('crumby:init'),
   ready: () => ipcRenderer.send('crumby:ready'),
   quit: () => ipcRenderer.send('crumby:quit'),
+  trash: (id) => ipcRenderer.invoke('crumby:trash', id),
 });

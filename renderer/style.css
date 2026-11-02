@@ -60,3 +60,17 @@ body.preview { background: linear-gradient(#2f7fb4 0%, #5aa6cf 45%, #2c9aa5 60%,
 #stopIcon { font-size: 10px; margin-right: 3px; }
 .buttons button.resume { background: #0a84ff; border-color: #0a84ff; color: #fff; }
 .buttons button.resume:hover { background: #2b95ff; }
+.confirm { display: none; margin-top: 12px; }
+body.confirming .confirm { display: block; }
+body.confirming .buttons { display: none; }
+.confirm p { font-size: 11.5px; line-height: 1.45; color: #c7c7cc; }
+.confirm p b { color: #fff; font-weight: 600; }
+.cbtns { display: flex; gap: 8px; margin-top: 10px; }
+.cbtns button {
+  flex: 1; height: 30px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.06);
+  background: #2c2c2e; color: #e5e5ea; font: 600 12px "Segoe UI", system-ui, sans-serif; cursor: pointer;
+}
+.cbtns button:hover { background: #363639; }
+.cbtns button.primary { background: #0a84ff; border-color: #0a84ff; color: #fff; }
+.cbtns button.primary:hover { background: #2b95ff; }
+.cbtns button:disabled { opacity: .4; cursor: default; }

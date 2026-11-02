@@ -99,7 +99,7 @@ const S = {
   items: [], total: 0, totalBytes: 0, binCap: 0.72,
   robot: { x: 0, y: 0, a: -Math.PI / 2, moving: false, brush: 0, kx: 0, ky: 0, wob: 0 },
   dock: { x: 0, y: 0 },
-  state: 'boot', stateT: 0, homeReason: null,
+  state: 'confirm', stateT: 0, homeReason: null,
   mapped: false, beamA: 0, beamStart: 0, beamSwept: 0,
   battery: 100, binLoad: 0, collected: 0, bytes: 0, elapsed: 0, running: false,
   paused: false, muted: false, stopped: false,
@@ -260,7 +260,8 @@ async function setup() {
   for (const r of raw) {
     const icon = r.icon ? await loadImg(r.icon) : null;
     const it = {
-      name: r.name, kind: r.kind, size: r.size || 0, iconSize: r.iconSize || 48,
+      id: r.id != null ? r.id : S.items.length, name: r.name, kind: r.kind, size: r.size || 0, iconSize: r.iconSize || 48,
+      fixed: r.canTrash === false || (r.canTrash == null && r.kind === 'system'),
       x: clamp(r.x, 20, W - 20), y: clamp(r.y, 20, H - 40), vx: 0, vy: 0,
       st: 'floor', revealed: false, glow: 0, t: 0, dur: 0, rot: 0, sx: 0, sy: 0,
       rv: 0, rest: 0, warp: 0, warpA: 0, tumbled: false, thrown: false, phase: Math.random() * TAU,
@@ -271,8 +272,13 @@ async function setup() {
     it.sprite = itemSprite(it, icon || genericIcon(it.kind, it.iconSize));
     S.items.push(it);
   }
-  S.total = S.items.length;
+  S.total = S.items.filter((i) => !i.fixed).length;
   $('countOf').textContent = `of ${S.total} items`;
+  const tb = S.items.filter((i) => !i.fixed).reduce((a, i) => a + i.size, 0);
+  $('confirmText').innerHTML = S.total
+    ? `<b>${S.total} ${S.total === 1 ? 'item' : 'items'}</b> (${fmtBytes(tb)}) will be moved to the <b>Recycle Bin</b>. You can restore them from there.`
+    : 'Your desktop is already clean.';
+  $('startBtn').disabled = !S.total;
 
   bindUI();
   if (!PREVIEW) window.crumby.ready();
@@ -302,12 +308,12 @@ function turnTo(a, dt) {
   return Math.abs(da) < 0.02;
 }
 
-function floorItems() { return S.items.filter((i) => i.st === 'floor'); }
+function floorItems() { return S.items.filter((i) => i.st === 'floor' && !i.fixed); }
 
 function pickTarget() {
   const r = S.robot; let best = null, bc = Infinity;
   for (const it of S.items) {
-    if (it.st !== 'floor' || !it.revealed) continue;
+    if (it.st !== 'floor' || !it.revealed || it.fixed) continue;
     const d = Math.hypot(it.x - r.x, it.y - r.y);
     const c = d + 55 * Math.abs(angDiff(Math.atan2(it.y - r.y, it.x - r.x), r.a));
     if (c < bc) { bc = c; best = it; }
@@ -323,10 +329,29 @@ function startSuck(it) {
 }
 
 function finishSuck(it) {
-  it.st = 'gone';
-  S.collected++; S.bytes += it.size; S.binLoad += it.load;
   if (S.strain === it) S.strain = null;
   if (S.target === it) S.target = null;
+  it.st = 'pending';
+  const job = PREVIEW ? Promise.resolve({ ok: true }) : window.crumby.trash(it.id);
+  job.then((res) => {
+    if (res && res.ok) {
+      it.st = 'gone';
+      S.collected++; S.bytes += it.size; S.binLoad += it.load;
+    } else spitOut(it, res && res.error);
+  }, (e) => spitOut(it, String(e)));
+}
+
+// Windows refused (file in use, no permission...): the robot coughs it back up and leaves it alone
+function spitOut(it, why) {
+  const r = S.robot;
+  const a = r.a + Math.PI + (Math.random() - 0.5) * 1.2;
+  it.st = 'floor'; it.fixed = true; it.warp = 0;
+  it.x = r.x + Math.cos(a) * (R + 10); it.y = r.y + Math.sin(a) * (R + 10);
+  it.vx = Math.cos(a) * 420; it.vy = Math.sin(a) * 420; it.rv = it.spin * 12;
+  S.total = Math.max(0, S.total - 1); $('countOf').textContent = `of ${S.total} items`;
+  S.flash = { text: `Can't recycle "${it.name}"`, until: S.time + 2.5 };
+  Snd.thud();
+  if (why) console.warn('trash failed:', it.name, why);
 }
 
 function revealSweep(prevSwept) {
@@ -353,6 +378,8 @@ function update(dt) {
   r.wob *= Math.exp(-4 * dt);
 
   switch (S.state) {
+    case 'confirm':
+      break;
     case 'boot':
       if (S.stateT > 1.1) { Snd.init(); Snd.chirp(true); S.running = true; setState('undock'); }
       break;
@@ -379,7 +406,7 @@ function update(dt) {
       }
       if (!S.target || S.target.st !== 'floor') S.target = pickTarget();
       if (!S.target) {
-        if (!S.items.some((i) => i.st === 'floor' || i.st === 'suck' || i.st === 'held')) goHome('done');
+        if (!S.items.some((i) => ((i.st === 'floor' || i.st === 'held') && !i.fixed) || i.st === 'suck' || i.st === 'pending')) goHome('done');
         break;
       }
       driveTo(S.target.x, S.target.y, dt, SPEED, 2);
@@ -429,7 +456,7 @@ function update(dt) {
   if (S.state === 'mapping') Snd.scanStart(); else Snd.scanStop();
 
   // battery
-  const atDock = ['boot', 'emptying', 'docked', 'charging', 'done', 'stopped'].includes(S.state);
+  const atDock = ['confirm', 'boot', 'emptying', 'docked', 'charging', 'done', 'stopped'].includes(S.state);
   if (atDock) S.battery = Math.min(100, S.battery + 3.2 * dt);
   else if (S.state !== 'lifted' && S.state !== 'halted') S.battery = Math.max(1, S.battery - (S.strain ? 0.45 : 0.16) * dt);
   if (S.state === 'cleaning' && S.battery < 15) goHome('battery');
@@ -442,7 +469,7 @@ function update(dt) {
     if (it.glow > 0) it.glow = Math.max(0, it.glow - dt * 0.9);
     if (it.st === 'floor') {
       const dx = r.x - it.x, dy = r.y - it.y, d = Math.max(1, Math.hypot(dx, dy));
-      if (suctionOn && it.revealed && d < G) {
+      if (suctionOn && it.revealed && !it.fixed && d < G) {
         const f = 1 - d / G; // 0 at the edge, 1 under the robot
         S.near = Math.max(S.near, f);
         // bend toward the robot
@@ -473,13 +500,13 @@ function update(dt) {
         if (it.y < 24 || it.y > H - 40) { it.vy *= -0.6; it.y = clamp(it.y, 24, H - 40); }
         const sp = Math.hypot(it.vx, it.vy);
         if (sp < 6) { it.vx = it.vy = 0; it.thrown = false; }
-        if (it.thrown && sp > 180 && d < R + 18 && S.state !== 'lifted') { // hit the robot!
+        if (it.thrown && !it.fixed && sp > 180 && d < R + 18 && S.state !== 'lifted') { // hit the robot!
           r.kx = it.vx * 0.35; r.ky = it.vy * 0.35; r.wob = 1;
           S.flash = { text: 'Ouch.', until: S.time + 1.2 };
           Snd.thud(); it.vx = it.vy = 0; it.thrown = false; it.revealed = true; startSuck(it);
         }
       }
-      if (it.st === 'floor' && suctionOn && it.revealed && !S.strain) {
+      if (it.st === 'floor' && suctionOn && it.revealed && !it.fixed && !S.strain) {
         const d2 = Math.hypot(it.x - r.x, it.y - r.y);
         if (d2 < R * 0.85) startSuck(it);
       }
@@ -700,6 +727,7 @@ function statusText() {
   if (S.paused) return 'Paused';
   if (S.flash) return S.flash.text;
   switch (S.state) {
+    case 'confirm': return 'Ready';
     case 'boot': return 'Waking up';
     case 'undock': return S.mapped ? 'Leaving the dock' : 'Waking up';
     case 'mapping': return 'Mapping your desktop';
@@ -729,7 +757,8 @@ function updatePanel(dt) {
   $('size').textContent = fmtBytes(S.bytes);
   $('time').textContent = fmtTime(S.elapsed);
   const halted = S.state === 'halted';
-  $('stop').disabled = ['done', 'boot'].includes(S.state);
+  $('stop').disabled = ['done', 'boot', 'confirm'].includes(S.state);
+  document.body.classList.toggle('confirming', S.state === 'confirm');
   $('stopIcon').innerHTML = halted ? '&#9654;' : '&#10005;';
   $('stopText').textContent = halted ? 'Resume' : 'Stop';
   $('stop').classList.toggle('resume', halted);
@@ -751,6 +780,8 @@ function bindUI() {
   addEventListener('resize', resize);
   addEventListener('keydown', (e) => { if (e.key === 'Escape') quit(); });
   $('close').addEventListener('click', quit);
+  $('startBtn').addEventListener('click', () => { Snd.init(); setState('boot'); S.stateT = 1.0; });
+  $('cancelBtn').addEventListener('click', quit);
   $('sound').addEventListener('click', () => {
     S.muted = !S.muted; Snd.init(); Snd.mute(S.muted);
     $('waves').style.display = S.muted ? 'none' : ''; $('mute').style.display = S.muted ? '' : 'none';
@@ -785,7 +816,8 @@ function bindUI() {
   cv.addEventListener('pointerdown', (e) => {
     Snd.init();
     const x = e.clientX, y = e.clientY, r = S.robot;
-    if (Math.hypot(x - r.x, y - r.y) < R) {
+    if (S.state === 'confirm') { /* waiting for Start */ }
+    else if (Math.hypot(x - r.x, y - r.y) < R) {
       S.drag = { kind: 'robot', dx: x - r.x, dy: y - r.y, prev: S.state };
       if (S.strain) { S.strain.st = 'floor'; S.strain.x = S.strain.sx; S.strain.y = S.strain.sy; S.strain = null; }
       setState('lifted'); S.target = null;
@@ -825,7 +857,8 @@ function bindUI() {
       it.vx = clamp((lastP.x - old.x) / dtm, -2600, 2600); it.vy = clamp((lastP.y - old.y) / dtm, -2600, 2600);
       if (now - lastP.t > 120) it.vx = it.vy = 0;
       it.st = 'floor'; it.thrown = Math.hypot(it.vx, it.vy) > 180;
-      if (['done', 'stopped'].includes(S.state) && S.homeReason !== 'stop') { S.homeReason = null; S.running = true; setState('undock'); }
+      if (it.fixed) { /* system icons just slide around */ }
+      else if (['done', 'stopped'].includes(S.state) && S.homeReason !== 'stop') { S.homeReason = null; S.running = true; setState('undock'); }
     }
   };
   cv.addEventListener('pointerup', release);

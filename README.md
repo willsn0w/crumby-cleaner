@@ -3,17 +3,23 @@
 # Crumby
 
 > [!WARNING]
-> **Versão 1.1 (alpha) — ainda não está funcionando.** Este projeto está em desenvolvimento e o executável ainda não funciona corretamente no Windows. Use por sua conta e risco.
+> **Versão 1.2 (alpha) — ainda em testes.** A partir desta versão o Crumby **move os arquivos da área de trabalho para a Lixeira do Windows de verdade**. Ainda não foi testado a fundo no Windows: use por sua conta e risco e confira a Lixeira se algo sumir.
 
-Um robô aspirador que limpa a sua área de trabalho do Windows. Ele sai da base, mapeia a tela com um laser, recolhe os ícones um por um, volta para a base quando o compartimento enche, se esvazia e termina com tudo limpo.
+Um robô aspirador que limpa a sua área de trabalho do Windows de verdade. Ele sai da base, mapeia a tela com um laser, recolhe os ícones um por um e **cada ícone que ele engole vai para a Lixeira do Windows**. Volta para a base quando o compartimento enche, se esvazia e termina com tudo limpo.
 
-**Nenhum arquivo é movido ou apagado.** Os ícones reais só ficam escondidos enquanto o Crumby roda. Esc (ou a bolinha vermelha do painel) fecha o app e traz a área de trabalho de volta, mesmo se o app travar.
+**Nada é apagado de vez:** tudo vai para a Lixeira e pode ser restaurado de lá. Antes de começar, o painel mostra quantos itens serão movidos e só começa quando você clica em **Start cleaning**. Atalhos do sistema (Lixeira, Este Computador) ficam onde estão, e arquivos que o Windows não deixa mover (em uso, sem permissão) são "cuspidos" de volta e ficam na área de trabalho.
 
 ## Download
 
 Baixe o `Crumby.exe` na página de [Releases](../../releases) (Windows 10/11, 64 bits). Na primeira execução ele leva alguns segundos para se instalar em `%LOCALAPPDATA%\Crumby`; depois abre na hora.
 
 Como o executável não é assinado, o Windows pode mostrar o aviso do SmartScreen: clique em **Mais informações → Executar assim mesmo**.
+
+## Menu do clique direito
+
+Depois de abrir o `Crumby.exe` uma vez, aparece a opção **"Limpar a área de trabalho com Crumby"** ao clicar com o botão direito num espaço vazio da área de trabalho. No Windows 11 ela fica em **Mostrar mais opções** (ou Shift + F10).
+
+O registro é só para o seu usuário (não precisa de administrador). Para remover a opção do menu, rode `Crumby.exe --uninstall`.
 
 ## O que ele faz
 
@@ -24,10 +30,18 @@ Como o executável não é assinado, o Windows pode mostrar o aviso do SmartScre
 - **Bin cheio:** volta, entra de ré na base e se esvazia (*Self-emptying*), depois retoma.
 - **Bateria:** descarrega andando e recarrega na base.
 - **Interação:** arraste o robô com o mouse, ou arremesse um ícone nele (*Ouch.*).
+- **Lixeira de verdade:** cada ícone engolido vai para a Lixeira do Windows na hora; se o Windows recusar, o robô cospe o arquivo de volta (*Can't recycle…*).
+- **Confirmação:** antes de começar, o painel mostra quantos itens e quantos GB irão para a Lixeira, com **Start cleaning** e **Cancel**.
 - **Painel:** status, minimapa, Battery, Bin, itens, GB coletados, tempo, Pause e Stop. O Stop para o robô onde ele está e vira **Resume** para voltar a aspirar.
 - **Sons** sintetizados (escaneamento, motor, sucção, bipes, esvaziamento), com botão de mudo.
 
 ## Versões
+
+### 1.2 (alpha)
+- Limpeza de verdade: os arquivos e pastas da área de trabalho vão para a Lixeira do Windows conforme o robô os engole.
+- Tela de confirmação antes de começar (**Start cleaning** / **Cancel**).
+- Opção **"Limpar a área de trabalho com Crumby"** no menu do clique direito da área de trabalho; `Crumby.exe --uninstall` remove.
+- Arquivos que o Windows não deixa mover são cuspidos de volta; atalhos do sistema ficam no lugar.
 
 ### 1.1 (alpha)
 - Projeto renomeado para **Crumby** (app, painel, base, `Crumby.exe` e pasta de instalação).
@@ -43,7 +57,7 @@ Como o executável não é assinado, o Windows pode mostrar o aviso do SmartScre
 
 | Caminho | O que é |
 |---|---|
-| `main.js` | Processo principal do Electron: lê os arquivos do Desktop, pega ícones e posições, abre a camada transparente |
+| `main.js` | Processo principal do Electron: lê os arquivos do Desktop, pega ícones e posições, abre a camada transparente, move itens para a Lixeira e registra o menu do clique direito |
 | `desktop-helper.ps1` | Ajudante do Windows (PowerShell + C#): lê as posições dos ícones e esconde/mostra a camada de ícones |
 | `renderer/` | Piso, robô, base, física, máquina de estados, painel e sons |
 | `renderer/assets/` | Imagens do robô e da base (SVG + PNG) |
@@ -66,5 +80,6 @@ npm run build:win
 
 ## Limitações
 
-- Funciona no monitor principal. Ícones em outros monitores somem durante a limpeza e voltam no Esc.
+- Funciona no monitor principal. Ícones em outros monitores não são limpos: somem durante a limpeza e voltam no Esc.
+- Itens da área de trabalho pública (`C:\Users\Public\Desktop`) precisam de permissão de administrador para ir para a Lixeira; sem ela, o robô os cospe de volta.
 - Se a leitura das posições dos ícones falhar, ele os arruma na grade padrão do Windows.

@@ -1,9 +1,11 @@
 // Crumby — a desktop-cleaning robot that lives on your wallpaper.
 // Main process: finds desktop icons, hides the real ones, opens a transparent
-// overlay where the robot "collects" them. Nothing on disk is moved or deleted;
-// Esc (or closing) brings the desktop back exactly as it was.
+// overlay where the robot collects them. Every icon the robot swallows is moved
+// to the Windows Recycle Bin (shell.trashItem), so it can always be restored.
+// Also adds "Limpar a área de trabalho com Crumby" to the desktop right-click menu.
 
-const { app, BrowserWindow, ipcMain, screen, nativeImage, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, nativeImage, globalShortcut, shell, dialog } = require('electron');
+const { execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -160,8 +162,12 @@ async function collectItems(workArea, scale) {
   }
 
   const out = [];
+  itemPaths = [];
   for (const it of items) {
+    itemPaths.push(it.file ? it.file.path : null);
     out.push({
+      id: out.length,
+      canTrash: !!it.file,
       name: it.name,
       x: it.x, y: it.y, iconSize: it.iconSize,
       size: it.file ? it.file.size : 0,
@@ -170,6 +176,40 @@ async function collectItems(workArea, scale) {
     });
   }
   return out;
+}
+
+// ---------- recycle bin ----------
+let itemPaths = [];
+const trashed = new Set();
+async function trashItem(id) {
+  const p = itemPaths[id];
+  if (!p) return { ok: false, error: 'not a file' };
+  if (trashed.has(id)) return { ok: true };
+  try {
+    await shell.trashItem(p);
+    trashed.add(id);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e && e.message || e) };
+  }
+}
+
+// ---------- desktop right-click menu (per user, no admin needed) ----------
+const MENU_KEY = 'HKCU\\Software\\Classes\\DesktopBackground\\Shell\\Crumby';
+function reg(args) {
+  return new Promise((res) => execFile('reg.exe', args, { windowsHide: true }, (err) => res(!err)));
+}
+async function registerContextMenu() {
+  if (process.platform !== 'win32' || !app.isPackaged) return;
+  const exe = process.execPath;
+  await reg(['add', MENU_KEY, '/ve', '/d', 'Limpar a área de trabalho com Crumby', '/f']);
+  await reg(['add', MENU_KEY, '/v', 'Icon', '/d', `"${exe}",0`, '/f']);
+  await reg(['add', MENU_KEY, '/v', 'Position', '/d', 'Top', '/f']);
+  await reg(['add', MENU_KEY + '\\command', '/ve', '/d', `"${exe}" --clean`, '/f']);
+}
+async function unregisterContextMenu() {
+  if (process.platform !== 'win32') return;
+  await reg(['delete', MENU_KEY, '/f']);
 }
 
 // ---------- lifecycle ----------
@@ -212,12 +252,22 @@ async function createWindow() {
     await helperCmd('hide', 5000); // real icons vanish the moment our copies are on screen
   });
   ipcMain.on('crumby:quit', () => quit());
+  ipcMain.handle('crumby:trash', (e, id) => trashItem(id));
 
   await win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   globalShortcut.register('Escape', () => quit());
   win.on('closed', () => quit());
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(async () => {
+  if (process.argv.includes('--uninstall')) {
+    await unregisterContextMenu();
+    await dialog.showMessageBox({ type: 'info', title: 'Crumby', message: 'Crumby foi removido do menu do clique direito.' });
+    app.exit(0);
+    return;
+  }
+  registerContextMenu(); // refreshed on every launch so it always points at this copy
+  createWindow();
+});
 app.on('window-all-closed', () => quit());
 process.on('exit', () => { try { helper && helper.stdin.end(); } catch (e) {} });
