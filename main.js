@@ -291,6 +291,14 @@ ipcMain.on('crumby:ready', async () => {
 });
 ipcMain.on('crumby:quit', () => endSession());
 ipcMain.handle('crumby:trash', (e, id) => trashItem(id));
+// "Start" after a run: look at the desktop again (new files saved since then)
+ipcMain.handle('crumby:rescan', async () => {
+  if (!session) return { items: [] };
+  const display = screen.getPrimaryDisplay();
+  trashed = new Set();
+  session.items = await collectItems(session.wa, display.scaleFactor);
+  return { items: session.items };
+});
 ipcMain.on('crumby:saveDock', (e, pos) => {
   if (pos && isFinite(pos.x) && isFinite(pos.y)) { settings.dock = { x: Math.round(pos.x), y: Math.round(pos.y) }; saveSettings(); }
 });

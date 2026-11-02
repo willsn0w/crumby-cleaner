@@ -41,10 +41,13 @@ Quando você fecha a janela de limpeza (Esc, Cancel ou a bolinha vermelha), o Cr
 - **Confirmação:** antes de começar, o painel mostra quantos itens e quantos GB irão para a Lixeira, com **Start cleaning** e **Cancel**.
 - **Base arrastável:** arraste a base para qualquer lugar da tela (ela nunca entra embaixo da barra de tarefas). Se o robô estiver estacionado, vai junto; o Crumby lembra a posição na próxima vez.
 - **Plano de fundo:** depois de fechado, fica na bandeja do sistema, pronto para a próxima limpeza.
-- **Painel:** status, minimapa, Battery, Bin, itens, GB coletados, tempo, Pause e Stop. O Stop para o robô onde ele está e vira **Resume** para voltar a aspirar.
+- **Painel:** status, minimapa, Battery, Bin, itens, GB coletados, tempo, Pause e Stop. O Stop para o robô onde ele está e vira **Resume** para voltar a aspirar. Quando o robô volta para a base no fim, o Pause vira **Start**: ele procura de novo os arquivos da área de trabalho e sai para mais uma rodada.
 - **Sons** sintetizados (escaneamento, motor, sucção, bipes, esvaziamento), com botão de mudo.
 
 ## Versões
+
+### 1.3.1
+- Depois que o robô volta para a base, o botão Pause vira **▶ Start** para rodar de novo, já pegando arquivos salvos depois da última limpeza.
 
 ### 1.3
 - Já está bastante funcional.

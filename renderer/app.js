@@ -244,24 +244,9 @@ function mockItems() {
   });
 }
 
-async function setup() {
-  if (PREVIEW) document.body.classList.add('preview');
-  resize();
-  const data = PREVIEW ? { items: mockItems() } : await window.crumby.init();
-
-  const [rImg, dImg] = await Promise.all([loadImg('assets/robot.svg'), loadImg('assets/dock.svg')]);
-  robotSprite = raster(rImg, R * 2, R * 2);
-  dockSprite = raster(dImg, DOCK_W, DOCK_H);
-
-  S.dock.x = Math.round(W * 0.82 - DOCK_W / 2);
-  S.dock.y = Math.round(H - DOCK_H - 4);
-  let saved = data.dock;
-  if (!saved && PREVIEW) { try { saved = JSON.parse(localStorage.getItem('crumby.dock') || 'null'); } catch (e) {} }
-  if (saved) { S.dock.x = saved.x; S.dock.y = saved.y; }
-  clampDock();
-  const dp = dockedPos(); S.robot.x = dp.x; S.robot.y = dp.y;
-
-  const raw = data.items || [];
+// (re)load the desktop icons onto the floor
+async function loadItems(raw) {
+  S.items = [];
   S.totalBytes = raw.reduce((a, b) => a + (b.size || 0), 0);
   const sizes = raw.map((r) => r.size || 0).sort((a, b) => b - a);
   const bigCut = Math.max(150e6, sizes[Math.floor(sizes.length * 0.12)] || Infinity);
@@ -290,6 +275,26 @@ async function setup() {
     ? `<b>${S.total} ${S.total === 1 ? 'item' : 'items'}</b> (${fmtBytes(tb)}) will be moved to the <b>Recycle Bin</b>. You can restore them from there.`
     : 'Your desktop is already clean.';
   $('startBtn').disabled = !S.total;
+}
+
+async function setup() {
+  if (PREVIEW) document.body.classList.add('preview');
+  resize();
+  const data = PREVIEW ? { items: mockItems() } : await window.crumby.init();
+
+  const [rImg, dImg] = await Promise.all([loadImg('assets/robot.svg'), loadImg('assets/dock.svg')]);
+  robotSprite = raster(rImg, R * 2, R * 2);
+  dockSprite = raster(dImg, DOCK_W, DOCK_H);
+
+  S.dock.x = Math.round(W * 0.82 - DOCK_W / 2);
+  S.dock.y = Math.round(H - DOCK_H - 4);
+  let saved = data.dock;
+  if (!saved && PREVIEW) { try { saved = JSON.parse(localStorage.getItem('crumby.dock') || 'null'); } catch (e) {} }
+  if (saved) { S.dock.x = saved.x; S.dock.y = saved.y; }
+  clampDock();
+  const dp = dockedPos(); S.robot.x = dp.x; S.robot.y = dp.y;
+
+  await loadItems(data.items || []);
 
   bindUI();
   if (!PREVIEW) window.crumby.ready();
@@ -773,7 +778,11 @@ function updatePanel(dt) {
   $('stopIcon').innerHTML = halted ? '&#9654;' : '&#10005;';
   $('stopText').textContent = halted ? 'Resume' : 'Stop';
   $('stop').classList.toggle('resume', halted);
-  $('pause').disabled = ['done', 'halted'].includes(S.state);
+  const again = CAN_RUN_AGAIN.includes(S.state);
+  $('pause').disabled = S.state === 'halted' || rescanning;
+  $('pause').classList.toggle('resume', again);
+  if (again) { $('pauseIcon').innerHTML = '&#9654;'; $('pauseText').textContent = 'Start'; }
+  else if (!S.paused) { $('pauseIcon').innerHTML = '&#10074;&#10074;'; $('pauseText').textContent = 'Pause'; }
 }
 
 // ---------- input ----------
@@ -785,6 +794,21 @@ function hitItem(x, y) {
   }
   return null;
 }
+const CAN_RUN_AGAIN = ['done', 'stopped'];
+let rescanning = false;
+async function runAgain() {
+  if (rescanning) return;
+  rescanning = true;
+  $('pause').disabled = true;
+  try {
+    const data = PREVIEW ? { items: mockItems() } : await window.crumby.rescan();
+    await loadItems(data.items || []);
+  } finally { rescanning = false; }
+  S.collected = 0; S.bytes = 0; S.elapsed = 0; S.trail = [];
+  S.mapped = false; S.homeReason = null; S.target = null; S.strain = null; S.running = true;
+  Snd.init(); setState('boot'); S.stateT = 1.0;
+}
+
 function quit() { if (PREVIEW) location.reload(); else window.crumby.quit(); }
 
 function bindUI() {
@@ -798,6 +822,7 @@ function bindUI() {
     $('waves').style.display = S.muted ? 'none' : ''; $('mute').style.display = S.muted ? '' : 'none';
   });
   $('pause').addEventListener('click', () => {
+    if (CAN_RUN_AGAIN.includes(S.state)) { runAgain(); return; } // back home: Start runs again
     S.paused = !S.paused; Snd.init();
     $('pauseText').textContent = S.paused ? 'Resume' : 'Pause';
     $('pauseIcon').innerHTML = S.paused ? '&#9654;' : '&#10074;&#10074;';
