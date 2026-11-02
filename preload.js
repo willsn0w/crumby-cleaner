@@ -3,8 +3,11 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('crumby', {
   init: () => ipcRenderer.invoke('crumby:init'),
   ready: () => ipcRenderer.send('crumby:ready'),
-  quit: () => ipcRenderer.send('crumby:quit'),
+  quit: (moves) => ipcRenderer.send('crumby:quit', moves),
   trash: (id) => ipcRenderer.invoke('crumby:trash', id),
   saveDock: (pos) => ipcRenderer.send('crumby:saveDock', pos),
-  rescan: () => ipcRenderer.invoke('crumby:rescan'),
+  rescan: (moves) => ipcRenderer.invoke('crumby:rescan', moves),
+  open: (id) => ipcRenderer.invoke('crumby:open', id),
+  itemMenu: (id, prot) => ipcRenderer.invoke('crumby:itemMenu', id, prot),
+  onEsc: (fn) => ipcRenderer.on('crumby:esc', () => fn()),
 });

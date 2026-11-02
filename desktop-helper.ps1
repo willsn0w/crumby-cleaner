@@ -1,8 +1,12 @@
 # Crumby desktop helper (Windows).
 # Long-lived process: reads commands from stdin, one per line.
-#   scan  -> prints one line per desktop icon: left<TAB>top<TAB>right<TAB>bottom<TAB>name (physical px)
-#   hide  -> hides the desktop icon layer
-#   show  -> shows it again
+#   scan     -> "VS<TAB>x<TAB>y" (virtual-screen origin), then one line per desktop icon:
+#               IT, index, posX, posY, icon rect (l t r b), full item rect (l t r b), name   (physical px)
+#   hide     -> hides the desktop icon layer
+#   show     -> shows it again
+#   move<TAB>name<TAB>x<TAB>y -> moves that real desktop icon to position x,y
+#   minall   -> minimizes all windows (so the desktop is in view)
+#   undomin  -> restores them
 # Every reply ends with a line "<<END>>".
 # When stdin closes (app quit OR crashed) the icons are ALWAYS shown again.
 
@@ -26,6 +30,7 @@ public static class CrumbyDesk {
   [DllImport("kernel32.dll")] static extern bool ReadProcessMemory(IntPtr p, IntPtr addr, byte[] buf, UIntPtr size, out UIntPtr n);
   [DllImport("kernel32.dll")] static extern bool WriteProcessMemory(IntPtr p, IntPtr addr, byte[] buf, UIntPtr size, out UIntPtr n);
   [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+  [DllImport("user32.dll")] static extern int GetSystemMetrics(int i);
   public delegate bool EnumProc(IntPtr h, IntPtr l);
   [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
 
@@ -61,17 +66,19 @@ public static class CrumbyDesk {
     if (hp == IntPtr.Zero) return "";
     IntPtr mem = VirtualAllocEx(hp, IntPtr.Zero, (UIntPtr)4096, 0x3000, 0x04);
     StringBuilder sb = new StringBuilder();
+    sb.Append("VS\t").Append(GetSystemMetrics(76)).Append('\t').Append(GetSystemMetrics(77)).Append('\n');
     UIntPtr n;
     try {
       for (int i = 0; i < count; i++) {
-        // icon rectangle (LVM_GETITEMRECT, LVIR_ICON)
-        byte[] rc = new byte[16];
-        BitConverter.GetBytes(1).CopyTo(rc, 0);
-        WriteProcessMemory(hp, mem, rc, (UIntPtr)16, out n);
-        SendMessage(lv, 0x100E, (IntPtr)i, mem);
-        ReadProcessMemory(hp, mem, rc, (UIntPtr)16, out n);
-        int l = BitConverter.ToInt32(rc, 0), t = BitConverter.ToInt32(rc, 4);
-        int r = BitConverter.ToInt32(rc, 8), b = BitConverter.ToInt32(rc, 12);
+        // item position (LVM_GETITEMPOSITION)
+        byte[] pt = new byte[8];
+        SendMessage(lv, 0x1010, (IntPtr)i, mem);
+        ReadProcessMemory(hp, mem, pt, (UIntPtr)8, out n);
+        int px = BitConverter.ToInt32(pt, 0), py = BitConverter.ToInt32(pt, 4);
+
+        // icon rectangle (LVM_GETITEMRECT, LVIR_ICON) and whole item incl. label (LVIR_BOUNDS)
+        int[] ic = ItemRect(lv, hp, mem, i, 1);
+        int[] bd = ItemRect(lv, hp, mem, i, 0);
 
         // item text (LVM_GETITEMTEXTW) - 64-bit LVITEMW
         IntPtr textAddr = (IntPtr)((long)mem + 1024);
@@ -86,7 +93,10 @@ public static class CrumbyDesk {
         ReadProcessMemory(hp, textAddr, tb, (UIntPtr)520, out n);
         len = Math.Max(0, Math.Min(len, 260));
         string name = Encoding.Unicode.GetString(tb, 0, len * 2);
-        sb.Append(l).Append('\t').Append(t).Append('\t').Append(r).Append('\t').Append(b).Append('\t').Append(name).Append('\n');
+        sb.Append("IT\t").Append(i).Append('\t').Append(px).Append('\t').Append(py);
+        foreach (int v in ic) sb.Append('\t').Append(v);
+        foreach (int v in bd) sb.Append('\t').Append(v);
+        sb.Append('\t').Append(name).Append('\n');
       }
     } finally {
       VirtualFreeEx(hp, mem, UIntPtr.Zero, 0x8000);
@@ -94,18 +104,58 @@ public static class CrumbyDesk {
     }
     return sb.ToString();
   }
+
+  static int[] ItemRect(IntPtr lv, IntPtr hp, IntPtr mem, int i, int code) {
+    UIntPtr n;
+    byte[] rc = new byte[16];
+    BitConverter.GetBytes(code).CopyTo(rc, 0);
+    WriteProcessMemory(hp, mem, rc, (UIntPtr)16, out n);
+    SendMessage(lv, 0x100E, (IntPtr)i, mem);
+    ReadProcessMemory(hp, mem, rc, (UIntPtr)16, out n);
+    return new int[] { BitConverter.ToInt32(rc, 0), BitConverter.ToInt32(rc, 4), BitConverter.ToInt32(rc, 8), BitConverter.ToInt32(rc, 12) };
+  }
+
+  // move a real desktop icon (found by its label) to x,y (LVM_SETITEMPOSITION)
+  public static bool Move(string name, int x, int y) {
+    IntPtr lv = ListView();
+    if (lv == IntPtr.Zero) return false;
+    string scan = Scan();
+    foreach (string line in scan.Split('\n')) {
+      string[] p = line.Split('\t');
+      if (p.Length < 13 || p[0] != "IT") continue;
+      string nm = string.Join("\t", p, 12, p.Length - 12);
+      if (nm != name) continue;
+      int idx = int.Parse(p[1]);
+      long lp = ((long)(y & 0xFFFF) << 16) | (long)(x & 0xFFFF);
+      SendMessage(lv, 0x100F, (IntPtr)idx, (IntPtr)lp);
+      return true;
+    }
+    return false;
+  }
 }
 "@
 
+$minimized = $false
+$shellApp = $null
 try {
   while ($true) {
     $line = [Console]::In.ReadLine()
     if ($line -eq $null) { break }
+    $parts = $line.TrimEnd("`r").Split("`t")
     try {
-      switch ($line.Trim()) {
+      switch ($parts[0].Trim()) {
         'scan' { [Console]::Out.Write([CrumbyDesk]::Scan()) }
         'hide' { [CrumbyDesk]::Show($false) }
         'show' { [CrumbyDesk]::Show($true) }
+        'move' { if ($parts.Length -ge 4) { [void][CrumbyDesk]::Move($parts[1], [int]$parts[2], [int]$parts[3]) } }
+        'minall' {
+          if ($shellApp -eq $null) { $shellApp = New-Object -ComObject Shell.Application }
+          $shellApp.MinimizeAll(); $minimized = $true
+        }
+        'undomin' {
+          if ($minimized -and $shellApp -ne $null) { $shellApp.UndoMinimizeALL() }
+          $minimized = $false
+        }
         'exit' { break }
       }
     } catch { [Console]::Out.WriteLine("ERR`t" + $_.Exception.Message) }
@@ -115,4 +165,5 @@ try {
   }
 } finally {
   [CrumbyDesk]::Show($true)
+  if ($minimized -and $shellApp -ne $null) { try { $shellApp.UndoMinimizeALL() } catch {} }
 }

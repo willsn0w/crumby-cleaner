@@ -265,7 +265,11 @@ async function loadItems(raw) {
       big: (r.size || 0) >= bigCut,
       load: 0.5 / Math.max(1, N) + 0.5 * (S.totalBytes > 0 ? (r.size || 0) / S.totalBytes : 1 / Math.max(1, N)),
     };
-    it.sprite = itemSprite(it, icon || genericIcon(it.kind, it.iconSize));
+    it.canTrash = !it.fixed;
+    const shot = r.sprite ? await loadImg(r.sprite.url) : null;
+    it.sprite = shot
+      ? { canvas: shot, w: r.sprite.w, h: r.sprite.h, ax: r.sprite.ax, ay: r.sprite.ay } // pixel-exact copy of the real icon + name
+      : itemSprite(it, icon || genericIcon(it.kind, it.iconSize));
     S.items.push(it);
   }
   S.total = S.items.filter((i) => !i.fixed).length;
@@ -329,7 +333,7 @@ function floorItems() { return S.items.filter((i) => i.st === 'floor' && !i.fixe
 function pickTarget() {
   const r = S.robot; let best = null, bc = Infinity;
   for (const it of S.items) {
-    if (it.st !== 'floor' || !it.revealed || it.fixed) continue;
+    if (it.st !== 'floor' || !it.revealed || it.fixed || it === S.selected) continue;
     const d = Math.hypot(it.x - r.x, it.y - r.y);
     const c = d + 55 * Math.abs(angDiff(Math.atan2(it.y - r.y, it.x - r.x), r.a));
     if (c < bc) { bc = c; best = it; }
@@ -385,6 +389,7 @@ function update(dt) {
   r.moving = false;
   S.stateT += dt;
   if (S.flash && S.time > S.flash.until) S.flash = null;
+  if (S.selected && (S.time - S.selectedAt > 5 || S.selected.st !== 'floor')) S.selected = null;
 
   // kick from a thrown icon
   if (Math.abs(r.kx) + Math.abs(r.ky) > 1) {
@@ -485,7 +490,7 @@ function update(dt) {
     if (it.glow > 0) it.glow = Math.max(0, it.glow - dt * 0.9);
     if (it.st === 'floor') {
       const dx = r.x - it.x, dy = r.y - it.y, d = Math.max(1, Math.hypot(dx, dy));
-      if (suctionOn && it.revealed && !it.fixed && d < G) {
+      if (suctionOn && it.revealed && !it.fixed && it !== S.selected && d < G) {
         const f = 1 - d / G; // 0 at the edge, 1 under the robot
         S.near = Math.max(S.near, f);
         // bend toward the robot
@@ -504,6 +509,7 @@ function update(dt) {
         }
       }
       it.warp = Math.max(0, it.warp - dt * 1.8);
+      it.x = clamp(it.x, 24, W - 24); it.y = clamp(it.y, 24, H - 40); // never off the desktop
       // rotation spring toward its resting angle
       it.rv += angDiff(it.rest, it.rot) * 9 * dt;
       it.rv *= Math.exp(-3.2 * dt);
@@ -522,7 +528,7 @@ function update(dt) {
           Snd.thud(); it.vx = it.vy = 0; it.thrown = false; it.revealed = true; startSuck(it);
         }
       }
-      if (it.st === 'floor' && suctionOn && it.revealed && !it.fixed && !S.strain) {
+      if (it.st === 'floor' && suctionOn && it.revealed && !it.fixed && it !== S.selected && !S.strain) {
         const d2 = Math.hypot(it.x - r.x, it.y - r.y);
         if (d2 < R * 0.85) startSuck(it);
       }
@@ -612,7 +618,13 @@ function drawItem(it) {
   }
   ctx.rotate(rot); ctx.scale(sc, sc);
   ctx.globalAlpha = alpha;
-  if (it.st === 'held') { ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 18; ctx.shadowOffsetY = 10; ctx.scale(1.06, 1.06); }
+  if (it === S.selected || it.st === 'held') {
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,120,215,0.32)'; ctx.strokeStyle = 'rgba(120,180,240,0.9)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.rect(-sp.ax + 1.5, -sp.ay + 1.5, sp.w - 3, sp.h - 3); ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+  if (it.st === 'held') { ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 18; ctx.shadowOffsetY = 10; }
   if (it.glow > 0) {
     ctx.save(); ctx.globalAlpha = it.glow * 0.55; ctx.fillStyle = 'rgba(80,230,255,0.35)';
     ctx.shadowColor = '#3fe0ff'; ctx.shadowBlur = 18;
@@ -790,7 +802,8 @@ function hitItem(x, y) {
   for (let i = S.items.length - 1; i >= 0; i--) {
     const it = S.items[i];
     if (it.st !== 'floor') continue;
-    if (Math.abs(x - it.x) < ITEM_BOX_W / 2 - 4 && y > it.y - it.iconSize / 2 - 4 && y < it.y + it.iconSize / 2 + 34) return it;
+    const sp = it.sprite;
+    if (x >= it.x - sp.ax && x <= it.x - sp.ax + sp.w && y >= it.y - sp.ay && y <= it.y - sp.ay + sp.h) return it;
   }
   return null;
 }
@@ -801,7 +814,7 @@ async function runAgain() {
   rescanning = true;
   $('pause').disabled = true;
   try {
-    const data = PREVIEW ? { items: mockItems() } : await window.crumby.rescan();
+    const data = PREVIEW ? { items: mockItems() } : await window.crumby.rescan(currentPositions());
     await loadItems(data.items || []);
   } finally { rescanning = false; }
   S.collected = 0; S.bytes = 0; S.elapsed = 0; S.trail = [];
@@ -809,11 +822,24 @@ async function runAgain() {
   Snd.init(); setState('boot'); S.stateT = 1.0;
 }
 
-function quit() { if (PREVIEW) location.reload(); else window.crumby.quit(); }
+function currentPositions() {
+  return S.items.filter((i) => i.st === 'floor' || i.st === 'held').map((i) => ({ id: i.id, x: i.x, y: i.y }));
+}
+function quit() { if (PREVIEW) location.reload(); else window.crumby.quit(currentPositions()); }
+
+function selectItem(it) { S.selected = it; S.selectedAt = S.time; }
+function setProtected(it, on) {
+  if (!it.canTrash) return;
+  if (on && !it.fixed) { it.fixed = true; S.total = Math.max(0, S.total - 1); S.flash = { text: `Protected "${it.name}"`, until: S.time + 1.6 }; }
+  else if (!on && it.fixed) { it.fixed = false; S.total++; }
+  $('countOf').textContent = `of ${S.total} items`;
+  if (S.target === it) S.target = null;
+}
 
 function bindUI() {
   addEventListener('resize', resize);
   addEventListener('keydown', (e) => { if (e.key === 'Escape') quit(); });
+  if (!PREVIEW && window.crumby.onEsc) window.crumby.onEsc(quit);
   $('close').addEventListener('click', quit);
   $('startBtn').addEventListener('click', () => { Snd.init(); setState('boot'); S.stateT = 1.0; });
   $('cancelBtn').addEventListener('click', quit);
@@ -850,20 +876,24 @@ function bindUI() {
 
   // robot & icons on the floor
   cv.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
     Snd.init();
     const x = e.clientX, y = e.clientY, r = S.robot;
     const onRobot = Math.hypot(x - r.x, y - r.y) < R;
     if (hitDock(x, y) && (!onRobot || S.state === 'confirm')) {
       // move the dock (the robot rides along if it's parked on it)
       S.drag = { kind: 'dock', dx: x - S.dock.x, dy: y - S.dock.y, carry: ON_DOCK.includes(S.state) };
-    } else if (S.state === 'confirm') { /* waiting for Start */ }
-    else if (onRobot) {
+    } else if (onRobot && S.state !== 'confirm') {
       S.drag = { kind: 'robot', dx: x - r.x, dy: y - r.y, prev: S.state };
       if (S.strain) { S.strain.st = 'floor'; S.strain.x = S.strain.sx; S.strain.y = S.strain.sy; S.strain = null; }
       setState('lifted'); S.target = null;
     } else {
       const it = hitItem(x, y);
-      if (it) { it.st = 'held'; it.revealed = true; S.drag = { kind: 'item', it, dx: x - it.x, dy: y - it.y, hist: [{ x, y, t: performance.now() }] }; if (S.target === it) S.target = null; }
+      if (it) {
+        it.st = 'held'; it.vx = it.vy = 0; it.revealed = true; selectItem(it);
+        S.drag = { kind: 'item', it, dx: x - it.x, dy: y - it.y, x0: x, y0: y, hist: [{ x, y, t: performance.now() }] };
+        if (S.target === it) S.target = null;
+      } else S.selected = null; // click on the empty desktop clears the selection
     }
     if (S.drag) cv.setPointerCapture(e.pointerId);
   });
@@ -879,7 +909,7 @@ function bindUI() {
       S.dock.x = x - d.dx; S.dock.y = y - d.dy; clampDock();
       if (d.carry) { const p = dockedPos(); S.robot.x = p.x; S.robot.y = p.y; }
     } else if (d.kind === 'robot') { S.robot.x = x - d.dx; S.robot.y = y - d.dy; }
-    else { d.it.x = x - d.dx; d.it.y = y - d.dy; d.hist.push({ x, y, t: performance.now() }); if (d.hist.length > 8) d.hist.shift(); }
+    else { d.it.x = clamp(x - d.dx, 24, W - 24); d.it.y = clamp(y - d.dy, 24, H - 40); d.hist.push({ x, y, t: performance.now() }); if (d.hist.length > 8) d.hist.shift(); }
   });
   const release = () => {
     const d = S.drag; if (!d) return; S.drag = null; cv.style.cursor = 'default';
@@ -906,12 +936,34 @@ function bindUI() {
       const dtm = Math.max(16, lastP.t - old.t) / 1000;
       it.vx = clamp((lastP.x - old.x) / dtm, -2600, 2600); it.vy = clamp((lastP.y - old.y) / dtm, -2600, 2600);
       if (now - lastP.t > 120) it.vx = it.vy = 0;
+      const moved = Math.hypot(lastP.x - d.x0, lastP.y - d.y0);
+      if (moved < 4) it.vx = it.vy = 0; // just a click: select it, don't throw it
       it.st = 'floor'; it.thrown = Math.hypot(it.vx, it.vy) > 180;
+      selectItem(it);
       if (it.fixed) { /* system icons just slide around */ }
       else if (['done', 'stopped'].includes(S.state) && S.homeReason !== 'stop') { S.homeReason = null; S.running = true; setState('undock'); }
     }
   };
   cv.addEventListener('pointerup', release);
+
+  // double-click opens the file, right-click shows its menu — like the real desktop
+  cv.addEventListener('dblclick', (e) => {
+    const it = hitItem(e.clientX, e.clientY);
+    if (!it) return;
+    selectItem(it);
+    if (!PREVIEW && it.canTrash) window.crumby.open(it.id);
+  });
+  cv.addEventListener('contextmenu', async (e) => {
+    e.preventDefault();
+    const it = hitItem(e.clientX, e.clientY);
+    if (!it) return;
+    selectItem(it);
+    if (PREVIEW) return;
+    const choice = await window.crumby.itemMenu(it.id, it.fixed && it.canTrash);
+    if (choice === 'protect') setProtected(it, true);
+    else if (choice === 'unprotect') setProtected(it, false);
+    selectItem(it);
+  });
   cv.addEventListener('pointercancel', release);
 }
 

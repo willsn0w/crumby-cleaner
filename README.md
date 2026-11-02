@@ -36,6 +36,8 @@ Quando você fecha a janela de limpeza (Esc, Cancel ou a bolinha vermelha), o Cr
 - **Arquivo grande:** para, treme e mostra *Big file. Straining…*
 - **Bin cheio:** volta, entra de ré na base e se esvazia (*Self-emptying*), depois retoma.
 - **Bateria:** descarrega andando e recarrega na base.
+- **Ícones idênticos aos do Windows:** antes de esconder os ícones reais, o Crumby fotografa a área de trabalho com e sem eles e usa o recorte exato de cada um (imagem, tamanho, miniatura, setinha de atalho e nome). Para a foto sair limpa, ele minimiza as janelas abertas ao começar e as restaura ao fechar.
+- **Use os ícones durante a limpeza:** clique para selecionar, duplo clique para abrir, clique direito para *Abrir*, *Mostrar na pasta* ou *Não limpar este item*, e arraste para mudar de lugar. Ao fechar, os ícones reais ficam onde você os deixou. O robô não pega um item que você está segurando ou acabou de selecionar.
 - **Interação:** arraste o robô com o mouse, ou arremesse um ícone nele (*Ouch.*).
 - **Lixeira de verdade:** cada ícone engolido vai para a Lixeira do Windows na hora; se o Windows recusar, o robô cospe o arquivo de volta (*Can't recycle…*).
 - **Confirmação:** antes de começar, o painel mostra quantos itens e quantos GB irão para a Lixeira, com **Start cleaning** e **Cancel**.
@@ -45,6 +47,11 @@ Quando você fecha a janela de limpeza (Esc, Cancel ou a bolinha vermelha), o Cr
 - **Sons** sintetizados (escaneamento, motor, sucção, bipes, esvaziamento), com botão de mudo.
 
 ## Versões
+
+### 1.3.2
+- Corrigido: os ícones mudavam de tamanho, de imagem e de nome durante a limpeza. Agora são cópias exatas dos ícones do Windows.
+- Corrigido: não dava para mexer nos ícones enquanto o Crumby limpava. Agora dá para selecionar, abrir, usar o clique direito e arrastar, e a posição nova vai para a área de trabalho de verdade.
+- As janelas abertas são minimizadas no começo da limpeza e restauradas no fim.
 
 ### 1.3.1
 - Depois que o robô volta para a base, o botão Pause vira **▶ Start** para rodar de novo, já pegando arquivos salvos depois da última limpeza.
