@@ -1,17 +1,17 @@
-<p align="center"><img src="renderer/assets/robot.png" width="140" alt="Crumb robot"></p>
+<p align="center"><img src="renderer/assets/robot.png" width="140" alt="Crumby robot"></p>
 
-# Crumb
+# Crumby
 
 > [!WARNING]
 > **Versão 1.1 (alpha) — ainda não está funcionando.** Este projeto está em desenvolvimento e o executável ainda não funciona corretamente no Windows. Use por sua conta e risco.
 
 Um robô aspirador que limpa a sua área de trabalho do Windows. Ele sai da base, mapeia a tela com um laser, recolhe os ícones um por um, volta para a base quando o compartimento enche, se esvazia e termina com tudo limpo.
 
-**Nenhum arquivo é movido ou apagado.** Os ícones reais só ficam escondidos enquanto o Crumb roda. Esc (ou a bolinha vermelha do painel) fecha o app e traz a área de trabalho de volta, mesmo se o app travar.
+**Nenhum arquivo é movido ou apagado.** Os ícones reais só ficam escondidos enquanto o Crumby roda. Esc (ou a bolinha vermelha do painel) fecha o app e traz a área de trabalho de volta, mesmo se o app travar.
 
 ## Download
 
-Baixe o `Crumb.exe` na página de [Releases](../../releases) (Windows 10/11, 64 bits). Na primeira execução ele leva alguns segundos para se instalar em `%LOCALAPPDATA%\Crumb`; depois abre na hora.
+Baixe o `Crumby.exe` na página de [Releases](../../releases) (Windows 10/11, 64 bits). Na primeira execução ele leva alguns segundos para se instalar em `%LOCALAPPDATA%\Crumby`; depois abre na hora.
 
 Como o executável não é assinado, o Windows pode mostrar o aviso do SmartScreen: clique em **Mais informações → Executar assim mesmo**.
 
@@ -30,6 +30,7 @@ Como o executável não é assinado, o Windows pode mostrar o aviso do SmartScre
 ## Versões
 
 ### 1.1 (alpha)
+- Projeto renomeado para **Crumby** (app, painel, base, `Crumby.exe` e pasta de instalação).
 - Som durante o escaneamento a laser, com "ping" a cada arquivo encontrado.
 - Aspiração mais forte quando o robô passa em cima de um ícone, e motor que reage aos ícones por perto.
 - Ícones se distorcem, se contorcem e são puxados pela força do aspirador; alguns viram de cabeça para baixo ou mudam de lugar.
@@ -46,8 +47,8 @@ Como o executável não é assinado, o Windows pode mostrar o aviso do SmartScre
 | `desktop-helper.ps1` | Ajudante do Windows (PowerShell + C#): lê as posições dos ícones e esconde/mostra a camada de ícones |
 | `renderer/` | Piso, robô, base, física, máquina de estados, painel e sons |
 | `renderer/assets/` | Imagens do robô e da base (SVG + PNG) |
-| `launcher/` | Lançador em Go que embute o app num único `Crumb.exe` |
-| `scripts/build-win.sh` | Gera `dist/Crumb.exe` |
+| `launcher/` | Lançador em Go que embute o app num único `Crumby.exe` |
+| `scripts/build-win.sh` | Gera `dist/Crumby.exe` |
 
 ## Rodar e compilar
 
@@ -59,7 +60,7 @@ open renderer/index.html
 npm install
 npm start
 
-# gerar dist/Crumb.exe (Linux/macOS; precisa de go, curl, zip, unzip, git)
+# gerar dist/Crumby.exe (Linux/macOS; precisa de go, curl, zip, unzip, git)
 npm run build:win
 ```
 

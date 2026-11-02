@@ -1,4 +1,4 @@
-name: Build Crumb.exe
+name: Build Crumby.exe
 
 on:
   push:
@@ -22,20 +22,20 @@ jobs:
         run: cd renderer/assets && zip -q ../../dist/imagens-robo.zip robot.svg robot.png dock.svg dock.png icon.png
       - uses: actions/upload-artifact@v4
         with:
-          name: Crumb
+          name: Crumby
           path: dist/*
       - name: Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          name: Crumb ${{ github.ref_name }}
+          name: Crumby ${{ github.ref_name }}
           files: |
-            dist/Crumb.exe
+            dist/Crumby.exe
             dist/imagens-robo.zip
           body: |
-            Crumb para Windows 10/11 (x64).
+            Crumby para Windows 10/11 (x64).
 
-            - **Crumb.exe**: arquivo único, é só baixar e abrir. Na primeira vez ele leva alguns segundos para se instalar.
+            - **Crumby.exe**: arquivo único, é só baixar e abrir. Na primeira vez ele leva alguns segundos para se instalar.
             - **imagens-robo.zip**: imagens do robô e da base (SVG + PNG).
 
             O executável não é assinado. Se aparecer o aviso do SmartScreen, clique em *Mais informações → Executar assim mesmo*. Esc fecha o app e devolve a área de trabalho.

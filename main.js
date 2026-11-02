@@ -1,4 +1,4 @@
-// Crumb — a desktop-cleaning robot that lives on your wallpaper.
+// Crumby — a desktop-cleaning robot that lives on your wallpaper.
 // Main process: finds desktop icons, hides the real ones, opens a transparent
 // overlay where the robot "collects" them. Nothing on disk is moved or deleted;
 // Esc (or closing) brings the desktop back exactly as it was.
@@ -10,7 +10,7 @@ const os = require('os');
 const { spawn } = require('child_process');
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
-if (process.platform === 'win32') app.setAppUserModelId('app.crumb.desktop');
+if (process.platform === 'win32') app.setAppUserModelId('app.crumby.desktop');
 if (!app.requestSingleInstanceLock()) app.exit(0);
 
 let win = null;
@@ -24,7 +24,7 @@ function startHelper() {
   if (process.platform !== 'win32') return;
   try {
     const src = fs.readFileSync(path.join(__dirname, 'desktop-helper.ps1'), 'utf8');
-    const file = path.join(os.tmpdir(), 'crumb-desktop-helper.ps1');
+    const file = path.join(os.tmpdir(), 'crumby-desktop-helper.ps1');
     fs.writeFileSync(file, '﻿' + src, 'utf8');
     helper = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], {
       windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
@@ -198,20 +198,20 @@ async function createWindow() {
     transparent: true, frame: false, resizable: false, movable: false,
     minimizable: false, maximizable: false, fullscreenable: false,
     hasShadow: false, show: false, backgroundColor: '#00000000',
-    title: 'Crumb', icon: path.join(__dirname, 'renderer', 'assets', 'icon.png'),
+    title: 'Crumby', icon: path.join(__dirname, 'renderer', 'assets', 'icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, backgroundThrottling: false },
   });
   win.setMenu(null);
 
   const items = await collectItems(wa, display.scaleFactor);
 
-  ipcMain.handle('crumb:init', () => ({ items, width: wa.width, height: wa.height }));
-  ipcMain.on('crumb:ready', async () => {
+  ipcMain.handle('crumby:init', () => ({ items, width: wa.width, height: wa.height }));
+  ipcMain.on('crumby:ready', async () => {
     win.show();
     win.focus();
     await helperCmd('hide', 5000); // real icons vanish the moment our copies are on screen
   });
-  ipcMain.on('crumb:quit', () => quit());
+  ipcMain.on('crumby:quit', () => quit());
 
   await win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   globalShortcut.register('Escape', () => quit());

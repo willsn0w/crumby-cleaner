@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 190" width="140" height="190">
-  <!-- Crumb charging / self-emptying dock, top-down view -->
+  <!-- Crumby charging / self-emptying dock, top-down view -->
   <defs>
     <linearGradient id="ramp" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#1d1d20"/>
@@ -53,5 +53,5 @@
   <!-- bin window -->
   <rect x="27" y="126" width="86" height="40" rx="8" fill="#0c0c0e" stroke="#4a4a50" stroke-width="1"/>
   <rect x="59" y="130" width="22" height="32" rx="5" fill="url(#bag)"/>
-  <text x="70" y="182" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="10" font-weight="600" fill="#5c5c62" letter-spacing="0.5">crumb</text>
+  <text x="70" y="182" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="10" font-weight="600" fill="#5c5c62" letter-spacing="0.5">crumby</text>
 </svg>

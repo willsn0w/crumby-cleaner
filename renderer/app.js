@@ -1,5 +1,5 @@
 'use strict';
-/* Crumb — renderer: the floor, the robot, the dock and the control panel. */
+/* Crumby — renderer: the floor, the robot, the dock and the control panel. */
 
 const $ = (id) => document.getElementById(id);
 const TAU = Math.PI * 2;
@@ -7,7 +7,7 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, t) => a + (b - a) * t;
 const angDiff = (a, b) => { let d = (a - b) % TAU; if (d > Math.PI) d -= TAU; if (d < -Math.PI) d += TAU; return d; };
 
-const PREVIEW = !window.crumb; // opened outside the app (browser preview / tests)
+const PREVIEW = !window.crumby; // opened outside the app (browser preview / tests)
 
 // ---------- geometry ----------
 const R = 44;                       // robot radius (px)
@@ -240,7 +240,7 @@ function mockItems() {
 async function setup() {
   if (PREVIEW) document.body.classList.add('preview');
   resize();
-  const data = PREVIEW ? { items: mockItems() } : await window.crumb.init();
+  const data = PREVIEW ? { items: mockItems() } : await window.crumby.init();
 
   const [rImg, dImg] = await Promise.all([loadImg('assets/robot.svg'), loadImg('assets/dock.svg')]);
   robotSprite = raster(rImg, R * 2, R * 2);
@@ -275,7 +275,7 @@ async function setup() {
   $('countOf').textContent = `of ${S.total} items`;
 
   bindUI();
-  if (!PREVIEW) window.crumb.ready();
+  if (!PREVIEW) window.crumby.ready();
   last = performance.now();
   requestAnimationFrame(frame);
 }
@@ -745,7 +745,7 @@ function hitItem(x, y) {
   }
   return null;
 }
-function quit() { if (PREVIEW) location.reload(); else window.crumb.quit(); }
+function quit() { if (PREVIEW) location.reload(); else window.crumby.quit(); }
 
 function bindUI() {
   addEventListener('resize', resize);

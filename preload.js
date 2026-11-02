@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('crumb', {
-  init: () => ipcRenderer.invoke('crumb:init'),
-  ready: () => ipcRenderer.send('crumb:ready'),
-  quit: () => ipcRenderer.send('crumb:quit'),
+contextBridge.exposeInMainWorld('crumby', {
+  init: () => ipcRenderer.invoke('crumby:init'),
+  ready: () => ipcRenderer.send('crumby:ready'),
+  quit: () => ipcRenderer.send('crumby:quit'),
 });

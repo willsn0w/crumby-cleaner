@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
-  <!-- Crumb robot, top-down view, front faces up -->
+  <!-- Crumby robot, top-down view, front faces up -->
   <defs>
     <radialGradient id="shell" cx="38%" cy="32%" r="75%">
       <stop offset="0" stop-color="#ffffff"/>

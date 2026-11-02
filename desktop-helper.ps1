@@ -1,4 +1,4 @@
-# Crumb desktop helper (Windows).
+# Crumby desktop helper (Windows).
 # Long-lived process: reads commands from stdin, one per line.
 #   scan  -> prints one line per desktop icon: left<TAB>top<TAB>right<TAB>bottom<TAB>name (physical px)
 #   hide  -> hides the desktop icon layer
@@ -14,7 +14,7 @@ using System;
 using System.Text;
 using System.Runtime.InteropServices;
 
-public static class CrumbDesk {
+public static class CrumbyDesk {
   [DllImport("user32.dll")] static extern IntPtr FindWindow(string c, string w);
   [DllImport("user32.dll")] static extern IntPtr FindWindowEx(IntPtr p, IntPtr after, string c, string w);
   [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
@@ -103,9 +103,9 @@ try {
     if ($line -eq $null) { break }
     try {
       switch ($line.Trim()) {
-        'scan' { [Console]::Out.Write([CrumbDesk]::Scan()) }
-        'hide' { [CrumbDesk]::Show($false) }
-        'show' { [CrumbDesk]::Show($true) }
+        'scan' { [Console]::Out.Write([CrumbyDesk]::Scan()) }
+        'hide' { [CrumbyDesk]::Show($false) }
+        'show' { [CrumbyDesk]::Show($true) }
         'exit' { break }
       }
     } catch { [Console]::Out.WriteLine("ERR`t" + $_.Exception.Message) }
@@ -114,5 +114,5 @@ try {
     if ($line.Trim() -eq 'exit') { break }
   }
 } finally {
-  [CrumbDesk]::Show($true)
+  [CrumbyDesk]::Show($true)
 }

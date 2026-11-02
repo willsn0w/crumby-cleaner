@@ -1,5 +1,5 @@
-// Crumb.exe — single-file launcher.
-// On first run it unpacks the app to %LOCALAPPDATA%\Crumb\<version> (a few seconds),
+// Crumby.exe — single-file launcher.
+// On first run it unpacks the app to %LOCALAPPDATA%\Crumby\<version> (a few seconds),
 // then starts it. Later runs start instantly.
 package main
 
@@ -25,7 +25,7 @@ func msg(text string) {
 	user32 := syscall.NewLazyDLL("user32.dll")
 	box := user32.NewProc("MessageBoxW")
 	t, _ := syscall.UTF16PtrFromString(text)
-	c, _ := syscall.UTF16PtrFromString("Crumb")
+	c, _ := syscall.UTF16PtrFromString("Crumby")
 	box.Call(0, uintptr(unsafe.Pointer(t)), uintptr(unsafe.Pointer(c)), 0x10)
 }
 
@@ -68,7 +68,7 @@ func main() {
 	if base == "" {
 		base = os.TempDir()
 	}
-	root := filepath.Join(base, "Crumb")
+	root := filepath.Join(base, "Crumby")
 	dir := filepath.Join(root, version)
 	marker := filepath.Join(dir, ".installed")
 
@@ -83,15 +83,15 @@ func main() {
 		}
 		os.RemoveAll(dir)
 		if err := extract(dir); err != nil {
-			msg("Crumb could not unpack itself:\n" + err.Error())
+			msg("Crumby could not unpack itself:\n" + err.Error())
 			return
 		}
 		os.WriteFile(marker, []byte(version), 0o644)
 	}
 
-	cmd := exec.Command(filepath.Join(dir, "Crumb.exe"), os.Args[1:]...)
+	cmd := exec.Command(filepath.Join(dir, "Crumby.exe"), os.Args[1:]...)
 	cmd.Dir = dir
 	if err := cmd.Start(); err != nil {
-		msg("Crumb could not start:\n" + err.Error())
+		msg("Crumby could not start:\n" + err.Error())
 	}
 }
