@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Crumb robot, top-down view, front faces up -->
+  <defs>
+    <radialGradient id="shell" cx="38%" cy="32%" r="75%">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.55" stop-color="#e3e3e6"/>
+      <stop offset="0.85" stop-color="#b9b9be"/>
+      <stop offset="1" stop-color="#8a8a90"/>
+    </radialGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fdfdfd"/>
+      <stop offset="1" stop-color="#77777d"/>
+    </linearGradient>
+    <radialGradient id="top" cx="42%" cy="38%" r="70%">
+      <stop offset="0" stop-color="#2e2e31"/>
+      <stop offset="0.7" stop-color="#121214"/>
+      <stop offset="1" stop-color="#050506"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f2f2f4"/>
+      <stop offset="0.5" stop-color="#9c9ca2"/>
+      <stop offset="1" stop-color="#e6e6e9"/>
+    </linearGradient>
+    <radialGradient id="lens" cx="40%" cy="35%" r="70%">
+      <stop offset="0" stop-color="#4a4a50"/>
+      <stop offset="0.6" stop-color="#151517"/>
+      <stop offset="1" stop-color="#000"/>
+    </radialGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- shell / bumper -->
+  <circle cx="100" cy="100" r="97" fill="url(#shell)" stroke="url(#rim)" stroke-width="2"/>
+  <circle cx="100" cy="100" r="93" fill="none" stroke="#ffffff" stroke-opacity="0.7" stroke-width="1.5"/>
+  <!-- bumper seam (front arc) with end notches -->
+  <path d="M 26 62 A 86 86 0 0 1 174 62" fill="none" stroke="#56565c" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="M 26 62 L 18 58" stroke="#56565c" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="M 174 62 L 182 58" stroke="#56565c" stroke-width="2.2" stroke-linecap="round"/>
+  <!-- rear seam -->
+  <path d="M 60 176 A 86 86 0 0 0 140 176" fill="none" stroke="#6a6a70" stroke-width="1.8" stroke-linecap="round"/>
+
+  <!-- black top -->
+  <circle cx="100" cy="100" r="70" fill="url(#top)"/>
+  <circle cx="100" cy="100" r="70.5" fill="none" stroke="#5a5a60" stroke-width="1.6"/>
+  <ellipse cx="86" cy="70" rx="48" ry="28" fill="url(#gloss)"/>
+
+  <!-- status LEDs (front) -->
+  <circle cx="94" cy="64" r="3.4" fill="#d9d9dc"/>
+  <circle cx="108" cy="70" r="3.4" fill="#d9d9dc"/>
+  <circle cx="93.3" cy="63.2" r="1.2" fill="#fff"/>
+  <circle cx="107.3" cy="69.2" r="1.2" fill="#fff"/>
+
+  <!-- lidar turret (rear-center) -->
+  <circle cx="100" cy="116" r="26" fill="#0a0a0b"/>
+  <circle cx="100" cy="116" r="23" fill="none" stroke="url(#ring)" stroke-width="5"/>
+  <circle cx="100" cy="116" r="17" fill="url(#lens)"/>
+  <circle cx="93" cy="109" r="5" fill="#ffffff" fill-opacity="0.55"/>
+  <circle cx="91.5" cy="107.5" r="2" fill="#fff"/>
+</svg>

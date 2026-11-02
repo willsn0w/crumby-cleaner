@@ -1,0 +1,15 @@
+{
+  "name": "crumby-cleaner",
+  "productName": "Crumb",
+  "version": "1.0.0",
+  "description": "A skeuomorphic robot vacuum that cleans your Windows desktop.",
+  "main": "main.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "build:win": "bash scripts/build-win.sh"
+  },
+  "devDependencies": {
+    "electron": "33.2.1"
+  }
+}

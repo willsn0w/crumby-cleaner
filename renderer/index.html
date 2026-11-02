@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Crumb</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="floor"></canvas>
+
+<div id="panel">
+  <div class="titlebar" id="drag">
+    <span class="tl red" id="close" title="Quit and bring the desktop back"></span><span class="tl"></span><span class="tl"></span>
+  </div>
+  <div class="head">
+    <div class="logo"></div>
+    <div class="title">
+      <div class="name">Crumb</div>
+      <div class="status" id="status">Waking up</div>
+    </div>
+    <button id="sound" class="sound" title="Sound">
+      <svg viewBox="0 0 24 24" width="15" height="15"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path id="waves" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/><path id="mute" d="M16 9l6 6M22 9l-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" style="display:none"/></svg>
+    </button>
+  </div>
+
+  <div class="map"><canvas id="map"></canvas><div id="maplabel">Mapping</div></div>
+
+  <div class="bars">
+    <div class="bar">
+      <div class="row"><span>Battery</span><span id="batt">100%</span></div>
+      <div class="track"><div id="battFill" class="fill green"></div></div>
+    </div>
+    <div class="bar">
+      <div class="row"><span>Bin</span><span id="bin">0%</span></div>
+      <div class="track"><div id="binFill" class="fill blue"></div></div>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div><b id="count">0</b><small id="countOf">of 0 items</small></div>
+    <div class="c"><b id="size">Zero KB</b><small>collected</small></div>
+    <div class="r"><b id="time">0:00</b><small>elapsed</small></div>
+  </div>
+
+  <div class="buttons">
+    <button id="pause"><span id="pauseIcon">&#10074;&#10074;</span> <span id="pauseText">Pause</span></button>
+    <button id="stop">&#10005; Stop</button>
+  </div>
+  <p class="hint">Esc stops and brings your desktop back. Try dragging the robot, or throwing an icon at it.</p>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
