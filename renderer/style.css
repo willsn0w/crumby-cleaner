@@ -57,3 +57,6 @@ body.preview { background: linear-gradient(#2f7fb4 0%, #5aa6cf 45%, #2c9aa5 60%,
 .buttons button:disabled { opacity: .4; cursor: default; }
 #pauseIcon { font-size: 9px; letter-spacing: -1px; margin-right: 3px; }
 .hint { font-size: 10px; line-height: 1.4; color: #8e8e93; margin-top: 10px; }
+#stopIcon { font-size: 10px; margin-right: 3px; }
+.buttons button.resume { background: #0a84ff; border-color: #0a84ff; color: #fff; }
+.buttons button.resume:hover { background: #2b95ff; }

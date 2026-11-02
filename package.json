@@ -1,7 +1,7 @@
 {
   "name": "crumby-cleaner",
   "productName": "Crumb",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A skeuomorphic robot vacuum that cleans your Windows desktop.",
   "main": "main.js",
   "license": "MIT",

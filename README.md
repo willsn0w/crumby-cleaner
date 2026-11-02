@@ -3,7 +3,7 @@
 # Crumb
 
 > [!WARNING]
-> **Versão 1.0 (alpha) — ainda não está funcionando.** Este projeto está em desenvolvimento e o executável ainda não funciona corretamente no Windows. Use por sua conta e risco.
+> **Versão 1.1 (alpha) — ainda não está funcionando.** Este projeto está em desenvolvimento e o executável ainda não funciona corretamente no Windows. Use por sua conta e risco.
 
 Um robô aspirador que limpa a sua área de trabalho do Windows. Ele sai da base, mapeia a tela com um laser, recolhe os ícones um por um, volta para a base quando o compartimento enche, se esvazia e termina com tudo limpo.
 
@@ -17,14 +17,26 @@ Como o executável não é assinado, o Windows pode mostrar o aviso do SmartScre
 
 ## O que ele faz
 
-- **Mapeamento:** feixe de laser varre a tela e os arquivos aparecem no minimapa.
-- **Limpeza:** o robô vai até cada ícone e o "suga"; o caminho fica desenhado no minimapa.
+- **Mapeamento:** feixe de laser varre a tela com som de escaneamento; cada arquivo encontrado dá um "ping" e aparece no minimapa.
+- **Limpeza:** o robô vai até cada ícone e o "suga" com um som de aspiração forte; o motor ruge mais alto quando há ícones por perto. O caminho fica desenhado no minimapa.
+- **Gravidade:** os ícones perto do robô se esticam, se torcem e tremem na direção dele, são puxados e giram em volta. Alguns ficam inclinados ou de cabeça para baixo e mudam de lugar.
 - **Arquivo grande:** para, treme e mostra *Big file. Straining…*
 - **Bin cheio:** volta, entra de ré na base e se esvazia (*Self-emptying*), depois retoma.
 - **Bateria:** descarrega andando e recarrega na base.
 - **Interação:** arraste o robô com o mouse, ou arremesse um ícone nele (*Ouch.*).
-- **Painel:** status, minimapa, Battery, Bin, itens, GB coletados, tempo, Pause e Stop.
-- **Sons** sintetizados (motor, sucção, bipes), com botão de mudo.
+- **Painel:** status, minimapa, Battery, Bin, itens, GB coletados, tempo, Pause e Stop. O Stop para o robô onde ele está e vira **Resume** para voltar a aspirar.
+- **Sons** sintetizados (escaneamento, motor, sucção, bipes, esvaziamento), com botão de mudo.
+
+## Versões
+
+### 1.1 (alpha)
+- Som durante o escaneamento a laser, com "ping" a cada arquivo encontrado.
+- Aspiração mais forte quando o robô passa em cima de um ícone, e motor que reage aos ícones por perto.
+- Ícones se distorcem, se contorcem e são puxados pela força do aspirador; alguns viram de cabeça para baixo ou mudam de lugar.
+- Botão Stop corrigido: o robô para no lugar e o botão vira **Resume** para continuar a limpeza.
+
+### 1.0 (alpha)
+- Primeira versão: mapeamento, limpeza, arquivo grande, volta à base, esvaziamento, bateria, painel, arrastar o robô e arremessar ícones.
 
 ## Estrutura
 

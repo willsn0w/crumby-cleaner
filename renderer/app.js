@@ -132,12 +132,13 @@ const Snd = (() => {
     const hg = ac.createGain(); hg.gain.value = 0.35;
     hum.connect(lp).connect(hg).connect(motorGain); hum.start();
   }
-  function motor(level, strain) {
+  function motor(level, strain, near = 0) {
     if (!ac) return;
     const t = ac.currentTime;
-    motorGain.gain.setTargetAtTime(level * 0.07, t, 0.08);
-    motorBP.frequency.setTargetAtTime(520 + strain * 650, t, 0.1);
-    hum.frequency.setTargetAtTime(92 + strain * 38, t, 0.1);
+    // the vacuum roars louder and higher when icons are right under/next to it
+    motorGain.gain.setTargetAtTime(level * (0.07 + near * 0.11), t, 0.06);
+    motorBP.frequency.setTargetAtTime(520 + strain * 650 + near * 1400, t, 0.08);
+    hum.frequency.setTargetAtTime(92 + strain * 38 + near * 30, t, 0.1);
   }
   function burst(dur, f0, f1, vol, type = 'bandpass') {
     if (!ac) return;
@@ -158,9 +159,57 @@ const Snd = (() => {
     g.gain.exponentialRampToValueAtTime(vol, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.connect(g).connect(master); o.start(t); o.stop(t + dur + 0.02);
   }
+  // lidar scan: sweeping sci-fi whirr that follows the beam, plus a sonar shimmer
+  let scanN = null;
+  function scanStart() {
+    if (!ac || scanN) return;
+    const t = ac.currentTime;
+    const out = ac.createGain(); out.gain.setValueAtTime(0.0001, t); out.gain.exponentialRampToValueAtTime(0.11, t + 0.3);
+    out.connect(master);
+    const o = ac.createOscillator(); o.type = 'triangle'; o.frequency.value = 640;
+    const lfo = ac.createOscillator(); lfo.frequency.value = 2.7 / TAU; // one wobble per beam turn
+    const lfoG = ac.createGain(); lfoG.gain.value = 260; lfo.connect(lfoG).connect(o.frequency);
+    const trem = ac.createOscillator(); trem.frequency.value = 18;
+    const tremG = ac.createGain(); tremG.gain.value = 0.35;
+    const amp = ac.createGain(); amp.gain.value = 0.55; trem.connect(tremG).connect(amp.gain);
+    const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 900; bp.Q.value = 2;
+    o.connect(amp).connect(bp).connect(out);
+    const n = ac.createBufferSource(); n.buffer = noise; n.loop = true;
+    const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 5200;
+    const ng = ac.createGain(); ng.gain.value = 0.18; n.connect(hp).connect(ng).connect(out);
+    [o, lfo, trem, n].forEach((x) => x.start(t));
+    scanN = { out, srcs: [o, lfo, trem, n] };
+  }
+  function scanStop() {
+    if (!scanN) return;
+    const t = ac.currentTime, s = scanN; scanN = null;
+    s.out.gain.setTargetAtTime(0.0001, t, 0.12);
+    s.srcs.forEach((x) => x.stop(t + 0.6));
+  }
+  let lastPing = 0;
+  function ping() {
+    if (!ac || ac.currentTime - lastPing < 0.05) return;
+    lastPing = ac.currentTime;
+    tone(1760 + Math.random() * 600, 0, 0.12, 0.05);
+  }
+  // strong suction: a hiss that rises in pitch, a low "slurp" and a pop at the end
+  function suck(big) {
+    if (!ac) return;
+    const d = big ? 1.9 : 0.42;
+    burst(d, big ? 350 : 700, big ? 5000 : 6000, big ? 0.42 : 0.38, 'bandpass');
+    burst(d * 0.8, 200, 900, big ? 0.3 : 0.22, 'lowpass');
+    const t = ac.currentTime;
+    const o = ac.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(big ? 120 : 220, t); o.frequency.exponentialRampToValueAtTime(big ? 700 : 1100, t + d);
+    const g = ac.createGain(); g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.12, t + 0.04); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    o.connect(g).connect(master); o.start(t); o.stop(t + d + 0.05);
+    tone(big ? 520 : 780, d * 0.95, 0.06, 0.18, 'square');
+  }
+
   return {
-    init, motor,
-    pop: (big) => burst(big ? 0.5 : 0.16, big ? 300 : 900, big ? 2400 : 3200, big ? 0.25 : 0.16),
+    init, motor, scanStart, scanStop, ping,
+    pop: suck,
     chirp: (up = true) => { const a = up ? [988, 1319] : [1319, 988]; tone(a[0], 0, 0.09, 0.12); tone(a[1], 0.1, 0.12, 0.12); },
     done: () => { tone(988, 0, 0.1, 0.12); tone(1175, 0.11, 0.1, 0.12); tone(1568, 0.22, 0.2, 0.12); },
     whoosh: () => burst(2.6, 250, 1800, 0.22, 'lowpass'),
@@ -214,6 +263,8 @@ async function setup() {
       name: r.name, kind: r.kind, size: r.size || 0, iconSize: r.iconSize || 48,
       x: clamp(r.x, 20, W - 20), y: clamp(r.y, 20, H - 40), vx: 0, vy: 0,
       st: 'floor', revealed: false, glow: 0, t: 0, dur: 0, rot: 0, sx: 0, sy: 0,
+      rv: 0, rest: 0, warp: 0, warpA: 0, tumbled: false, thrown: false, phase: Math.random() * TAU,
+      spin: (Math.random() < 0.5 ? -1 : 1) * (0.6 + Math.random() * 0.7),
       big: (r.size || 0) >= bigCut,
       load: 0.5 / Math.max(1, N) + 0.5 * (S.totalBytes > 0 ? (r.size || 0) / S.totalBytes : 1 / Math.max(1, N)),
     };
@@ -283,7 +334,7 @@ function revealSweep(prevSwept) {
   for (const it of S.items) {
     if (it.revealed) continue;
     let a = (Math.atan2(it.y - r.y, it.x - r.x) - S.beamStart) % TAU; if (a < 0) a += TAU;
-    if (a <= S.beamSwept || S.beamSwept >= TAU) { it.revealed = true; it.glow = 1; }
+    if (a <= S.beamSwept || S.beamSwept >= TAU) { it.revealed = true; it.glow = 1; Snd.ping(); }
   }
 }
 
@@ -369,42 +420,68 @@ function update(dt) {
     case 'charging':
       if (S.battery >= 90) { Snd.chirp(true); setState('undock'); }
       break;
+    case 'halted': // Stop pressed: robot sits still until Resume
+      r.moving = false;
+      break;
     case 'lifted': case 'done': case 'stopped':
       break;
   }
+  if (S.state === 'mapping') Snd.scanStart(); else Snd.scanStop();
 
   // battery
   const atDock = ['boot', 'emptying', 'docked', 'charging', 'done', 'stopped'].includes(S.state);
   if (atDock) S.battery = Math.min(100, S.battery + 3.2 * dt);
-  else if (S.state !== 'lifted') S.battery = Math.max(1, S.battery - (S.strain ? 0.45 : 0.16) * dt);
+  else if (S.state !== 'lifted' && S.state !== 'halted') S.battery = Math.max(1, S.battery - (S.strain ? 0.45 : 0.16) * dt);
   if (S.state === 'cleaning' && S.battery < 15) goHome('battery');
 
-  // items: thrown physics, suction, reveal glow
+  // items: gravity well around the robot, thrown physics, suction, reveal glow
+  const suctionOn = ['cleaning', 'home', 'undock'].includes(S.state);
+  const G = R * 3.4; // reach of the vacuum's pull
+  S.near = 0;
   for (const it of S.items) {
     if (it.glow > 0) it.glow = Math.max(0, it.glow - dt * 0.9);
     if (it.st === 'floor') {
+      const dx = r.x - it.x, dy = r.y - it.y, d = Math.max(1, Math.hypot(dx, dy));
+      if (suctionOn && it.revealed && d < G) {
+        const f = 1 - d / G; // 0 at the edge, 1 under the robot
+        S.near = Math.max(S.near, f);
+        // bend toward the robot
+        it.warp = Math.max(it.warp, f);
+        it.warpA = Math.atan2(dy, dx);
+        // gravity: drift in, with a swirl around the robot
+        const a = f * f * 340;
+        it.vx += ((dx / d) * a + (-dy / d) * a * 0.55 * it.spin) * dt;
+        it.vy += ((dy / d) * a + (dx / d) * a * 0.55 * it.spin) * dt;
+        // torque: twist, and sometimes flip upside down and stay that way
+        it.rv += it.spin * f * f * 14 * dt;
+        if (!it.tumbled && f > 0.42 && Math.random() < dt * 1.6) {
+          it.tumbled = true;
+          it.rest = Math.random() < 0.45 ? Math.PI : it.spin * (0.25 + Math.random() * 0.6);
+          it.rv += it.spin * 9;
+        }
+      }
+      it.warp = Math.max(0, it.warp - dt * 1.8);
+      // rotation spring toward its resting angle
+      it.rv += angDiff(it.rest, it.rot) * 9 * dt;
+      it.rv *= Math.exp(-3.2 * dt);
+      it.rot += it.rv * dt;
+
       if (it.vx || it.vy) {
         it.x += it.vx * dt; it.y += it.vy * dt;
         const k = Math.exp(-2.6 * dt); it.vx *= k; it.vy *= k;
         if (it.x < 24 || it.x > W - 24) { it.vx *= -0.6; it.x = clamp(it.x, 24, W - 24); }
         if (it.y < 24 || it.y > H - 40) { it.vy *= -0.6; it.y = clamp(it.y, 24, H - 40); }
         const sp = Math.hypot(it.vx, it.vy);
-        if (sp < 8) it.vx = it.vy = 0;
-        const d = Math.hypot(it.x - r.x, it.y - r.y);
-        if (sp > 180 && d < R + 18 && S.state !== 'lifted') { // hit the robot!
+        if (sp < 6) { it.vx = it.vy = 0; it.thrown = false; }
+        if (it.thrown && sp > 180 && d < R + 18 && S.state !== 'lifted') { // hit the robot!
           r.kx = it.vx * 0.35; r.ky = it.vy * 0.35; r.wob = 1;
           S.flash = { text: 'Ouch.', until: S.time + 1.2 };
-          Snd.thud(); it.vx = it.vy = 0; it.revealed = true; startSuck(it);
+          Snd.thud(); it.vx = it.vy = 0; it.thrown = false; it.revealed = true; startSuck(it);
         }
       }
-      const canEat = ['cleaning', 'home', 'undock'].includes(S.state) || (S.state === 'mapping' && false);
-      if (it.st === 'floor' && canEat && it.revealed && !S.strain) {
-        const d = Math.hypot(it.x - r.x, it.y - r.y);
-        if (d < R * 0.85) startSuck(it);
-        else if (d < R * 1.7) { // suction pull
-          const pull = (1 - d / (R * 1.7)) * 60 * dt;
-          it.x += (r.x - it.x) / d * pull; it.y += (r.y - it.y) / d * pull;
-        }
+      if (it.st === 'floor' && suctionOn && it.revealed && !S.strain) {
+        const d2 = Math.hypot(it.x - r.x, it.y - r.y);
+        if (d2 < R * 0.85) startSuck(it);
       }
     } else if (it.st === 'suck') {
       it.t += dt / it.dur;
@@ -422,11 +499,11 @@ function update(dt) {
   }
   r.x = clamp(r.x, R, W - R); r.y = clamp(r.y, R, H - R);
 
-  if (S.running && !['done', 'stopped'].includes(S.state)) S.elapsed += dt;
+  if (S.running && !['done', 'stopped', 'halted'].includes(S.state)) S.elapsed += dt;
   r.brush += dt * (r.moving || S.state === 'mapping' || S.strain ? 16 : 0);
 
   const motorLevel = S.state === 'lifted' ? 0.35 : (S.strain ? 1.2 : (r.moving ? 1 : (S.state === 'mapping' ? 0.45 : 0)));
-  Snd.motor(motorLevel, S.strain ? 1 : 0);
+  Snd.motor(motorLevel, S.strain ? 1 : 0, suctionOn ? S.near : 0);
 }
 
 // ---------- drawing ----------
@@ -464,7 +541,7 @@ function drawDock() {
 
 function drawItem(it) {
   const sp = it.sprite;
-  let x = it.x, y = it.y, rot = 0, sc = 1, alpha = 1;
+  let x = it.x, y = it.y, rot = it.rot || 0, sc = 1, alpha = 1;
   if (it.st === 'suck') {
     const r = S.robot;
     let t = it.t;
@@ -472,16 +549,25 @@ function drawItem(it) {
       const resist = Math.min(1, t / 0.6);
       const jig = Math.sin(S.time * 55) * 3 * (1 - t);
       x = it.sx + jig; y = it.sy + Math.cos(S.time * 47) * 2 * (1 - t);
-      rot = Math.sin(S.time * 30) * 0.12 * resist;
+      rot = (it.rot || 0) + Math.sin(S.time * 30) * 0.12 * resist;
       if (t > 0.6) { const k = (t - 0.6) / 0.4; const e = k * k; x = lerp(x, r.x, e); y = lerp(y, r.y, e); rot += k * 6; sc = 1 - 0.92 * e; alpha = 1 - e * 0.8; }
       else sc = 1 - 0.08 * Math.sin(S.time * 20) * resist;
     } else {
       const e = t * t;
-      x = lerp(it.sx, r.x, e); y = lerp(it.sy, r.y, e); rot = t * 5.5; sc = 1 - 0.9 * e; alpha = 1 - e * 0.7;
+      x = lerp(it.sx, r.x, e); y = lerp(it.sy, r.y, e); rot = (it.rot || 0) + t * 5.5 * (it.spin > 0 ? 1 : -1); sc = 1 - 0.9 * e; alpha = 1 - e * 0.7;
     }
   }
   ctx.save();
-  ctx.translate(x, y); ctx.rotate(rot); ctx.scale(sc, sc);
+  ctx.translate(x, y);
+  const wv = it.st === 'suck' ? Math.max(it.warp, 0.6 * (1 - it.t)) : it.warp;
+  if (wv > 0.01) { // stretch toward the robot, squash sideways, shear and quiver
+    const q = 1 + 0.07 * Math.sin(S.time * 34 + it.phase);
+    ctx.rotate(it.warpA);
+    ctx.scale((1 + 0.55 * wv) * q, 1 - 0.35 * wv);
+    ctx.transform(1, 0, 0.5 * wv * Math.sign(it.spin), 1, 0, 0);
+    ctx.rotate(-it.warpA);
+  }
+  ctx.rotate(rot); ctx.scale(sc, sc);
   ctx.globalAlpha = alpha;
   if (it.st === 'held') { ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 18; ctx.shadowOffsetY = 10; ctx.scale(1.06, 1.06); }
   if (it.glow > 0) {
@@ -626,7 +712,7 @@ function statusText() {
     case 'docked': case 'charging': return 'Charging';
     case 'lifted': return 'Hey! Put me down';
     case 'done': return 'All clean';
-    case 'stopped': return 'Stopped';
+    case 'stopped': case 'halted': return 'Stopped';
   }
   return '';
 }
@@ -642,8 +728,12 @@ function updatePanel(dt) {
   $('count').textContent = S.collected;
   $('size').textContent = fmtBytes(S.bytes);
   $('time').textContent = fmtTime(S.elapsed);
-  $('stop').disabled = ['done', 'stopped'].includes(S.state) || S.homeReason === 'stop';
-  $('pause').disabled = ['done', 'stopped'].includes(S.state);
+  const halted = S.state === 'halted';
+  $('stop').disabled = ['done', 'boot'].includes(S.state);
+  $('stopIcon').innerHTML = halted ? '&#9654;' : '&#10005;';
+  $('stopText').textContent = halted ? 'Resume' : 'Stop';
+  $('stop').classList.toggle('resume', halted);
+  $('pause').disabled = ['done', 'halted'].includes(S.state);
 }
 
 // ---------- input ----------
@@ -669,13 +759,20 @@ function bindUI() {
     S.paused = !S.paused; Snd.init();
     $('pauseText').textContent = S.paused ? 'Resume' : 'Pause';
     $('pauseIcon').innerHTML = S.paused ? '&#9654;' : '&#10074;&#10074;';
-    if (S.paused) Snd.motor(0, 0);
+    if (S.paused) { Snd.motor(0, 0); Snd.scanStop(); }
   });
   $('stop').addEventListener('click', () => {
-    Snd.init(); S.paused = false; $('pauseText').textContent = 'Pause'; $('pauseIcon').innerHTML = '&#10074;&#10074;';
-    if (['boot', 'docked', 'charging', 'emptying'].includes(S.state)) { S.homeReason = 'stop'; setState(S.state === 'emptying' ? 'emptying' : 'docked'); }
-    else if (!['align', 'reverse'].includes(S.state)) goHome('stop');
-    else S.homeReason = 'stop';
+    Snd.init();
+    if (S.state === 'halted') { // Resume: pick up where it left off
+      setState(S.resumeState || 'cleaning'); S.resumeState = null; S.running = true;
+      Snd.chirp(true);
+    } else if (!['done', 'boot'].includes(S.state)) { // Stop: halt right where it is
+      S.paused = false; $('pauseText').textContent = 'Pause'; $('pauseIcon').innerHTML = '&#10074;&#10074;';
+      S.resumeState = S.state === 'lifted' ? 'cleaning' : S.state;
+      if (['align', 'reverse'].includes(S.resumeState)) S.resumeState = 'home';
+      S.target = null; setState('halted');
+      Snd.chirp(false);
+    }
   });
 
   // drag the panel by its title bar
@@ -714,7 +811,8 @@ function bindUI() {
     if (d.kind === 'robot') {
       Snd.thud();
       const left = S.items.some((i) => i.st === 'floor' || i.st === 'held');
-      if (S.homeReason === 'stop' || ['done', 'stopped'].includes(d.prev)) goHome(S.homeReason === 'stop' || d.prev === 'stopped' ? 'stop' : 'done');
+      if (d.prev === 'halted') setState('halted');
+      else if (S.homeReason === 'stop' || ['done', 'stopped'].includes(d.prev)) goHome(S.homeReason === 'stop' || d.prev === 'stopped' ? 'stop' : 'done');
       else if (!S.mapped) { S.beamStart = S.robot.a; S.beamA = S.beamStart; S.beamSwept = 0; S.items.forEach((i) => (i.revealed = false)); S.running = true; setState('mapping'); }
       else if (!left) goHome('done');
       else if (binPct() >= 100) goHome('bin');
@@ -726,7 +824,7 @@ function bindUI() {
       const dtm = Math.max(16, lastP.t - old.t) / 1000;
       it.vx = clamp((lastP.x - old.x) / dtm, -2600, 2600); it.vy = clamp((lastP.y - old.y) / dtm, -2600, 2600);
       if (now - lastP.t > 120) it.vx = it.vy = 0;
-      it.st = 'floor';
+      it.st = 'floor'; it.thrown = Math.hypot(it.vx, it.vy) > 180;
       if (['done', 'stopped'].includes(S.state) && S.homeReason !== 'stop') { S.homeReason = null; S.running = true; setState('undock'); }
     }
   };
