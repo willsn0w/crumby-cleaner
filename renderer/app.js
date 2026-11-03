@@ -924,6 +924,8 @@ function bindUI() {
       if (S.strain) S.strain = null;
       setState('lifted'); S.target = null;
     }
+    // the cycle is over and the robot/dock is being moved: the old path no longer matches anything
+    if (S.drag && !S.running) S.trail = [];
     if (S.drag) cv.setPointerCapture(e.pointerId);
   });
   cv.addEventListener('pointermove', (e) => {

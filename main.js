@@ -560,11 +560,14 @@ app.on('window-all-closed', () => { /* stay in the tray */ });
 
 // test mode: restart by itself when its files are replaced (makes testing on a real PC quick)
 function watchForUpdates() {
-  if (!TEST_MODE) return;
-  const files = ['main.js', 'preload.js', 'desktop-helper.ps1', 'renderer/app.js', 'renderer/index.html', 'renderer/style.css'];
+  // switching test mode on/off always restarts Crumby; in test mode, so does any change to its files
+  const files = TEST_MODE
+    ? ['test-mode', 'main.js', 'preload.js', 'desktop-helper.ps1', 'renderer/app.js', 'renderer/index.html', 'renderer/style.css']
+    : ['test-mode'];
   let timer = null;
   for (const f of files) {
-    fs.watchFile(path.join(__dirname, f), { interval: 1000 }, () => {
+    fs.watchFile(path.join(__dirname, f), { interval: 1000 }, (cur, prev) => {
+      if (cur.mtimeMs === prev.mtimeMs) return;
       clearTimeout(timer);
       timer = setTimeout(() => {
         if (helper) { try { helper.stdin.end(); } catch (e) {} }

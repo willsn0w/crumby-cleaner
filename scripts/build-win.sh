@@ -32,17 +32,17 @@ rm -f app/resources/default_app.asar app/LICENSES.chromium.html
 find app/locales -name '*.pak' ! -name 'en-US.pak' ! -name 'pt-BR.pak' -delete
 mkdir -p app/resources/app
 cp -r "$ROOT"/{main.js,preload.js,desktop-helper.ps1,renderer} app/resources/app/
-printf '{ "name": "crumby", "productName": "Crumby", "version": "1.5.2", "main": "main.js" }\n' > app/resources/app/package.json
+printf '{ "name": "crumby", "productName": "Crumby", "version": "1.5.3", "main": "main.js" }\n' > app/resources/app/package.json
 
 mkdir -p res && cp "$ROOT/build/icon.ico" res/icon.ico
 cat > res/winres.json <<'JSON'
 {
   "RT_GROUP_ICON": { "#1": { "0409": "icon.ico" } },
   "RT_VERSION": { "#1": { "0409": {
-    "fixed": { "file_version": "1.5.2.0", "product_version": "1.5.2.0" },
+    "fixed": { "file_version": "1.5.3.0", "product_version": "1.5.3.0" },
     "info": { "0409": {
-      "CompanyName": "Crumby", "FileDescription": "Crumby - desktop cleaning robot", "FileVersion": "1.5.2",
-      "InternalName": "Crumby.exe", "OriginalFilename": "Crumby.exe", "ProductName": "Crumby", "ProductVersion": "1.5.2" } } } } }
+      "CompanyName": "Crumby", "FileDescription": "Crumby - desktop cleaning robot", "FileVersion": "1.5.3",
+      "InternalName": "Crumby.exe", "OriginalFilename": "Crumby.exe", "ProductName": "Crumby", "ProductVersion": "1.5.3" } } } } }
 }
 JSON
 ./winres patch --in res/winres.json --no-backup app/Crumby.exe
@@ -53,9 +53,9 @@ rm -f "$ROOT/launcher/payload.zip"
 cp res/icon.ico "$ROOT/launcher/icon.ico"
 (cd "$ROOT/launcher" && "$WORK/winres" simply --icon icon.ico --manifest gui --arch amd64 \
   --product-name Crumby --file-description "Crumby - desktop cleaning robot" \
-  --product-version 1.5.2 --file-version 1.5.2 --original-filename Crumby.exe && rm icon.ico)
+  --product-version 1.5.3 --file-version 1.5.3 --original-filename Crumby.exe && rm icon.ico)
 V=$(sha256sum "$ROOT/launcher/payload.zip" | cut -c1-12)
 (cd "$ROOT/launcher" && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 GOFLAGS= \
-  go build -trimpath -ldflags "-s -w -H=windowsgui -X main.version=1.5.2-$V" -o "$ROOT/dist/Crumby.exe" .)
+  go build -trimpath -ldflags "-s -w -H=windowsgui -X main.version=1.5.3-$V" -o "$ROOT/dist/Crumby.exe" .)
 
 echo "Built $ROOT/dist/Crumby.exe"

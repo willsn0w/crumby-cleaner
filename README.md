@@ -3,7 +3,7 @@
 # Crumby
 
 > [!NOTE]
-> **Versão 1.5.2 — já está bastante funcional, e testada num Windows 11 de verdade.** O Crumby agora vive na sua área de trabalho como um bichinho de estimação (no estilo Desktop Goose e Shimeji): a área de trabalho do Windows continua funcionando normalmente por baixo dele, e tudo o que ele engole vai para a Lixeira.
+> **Versão 1.5.3 — já está bastante funcional, e testada num Windows 11 de verdade.** O Crumby agora vive na sua área de trabalho como um bichinho de estimação (no estilo Desktop Goose e Shimeji): a área de trabalho do Windows continua funcionando normalmente por baixo dele, e tudo o que ele engole vai para a Lixeira.
 
 Um robô aspirador que limpa a sua área de trabalho do Windows de verdade. Ele sai da base, mapeia a tela com um laser, vai até os ícones um por um e **cada ícone que ele engole vai para a Lixeira do Windows**. Volta para a base quando o compartimento enche, se esvazia e termina com tudo limpo.
 
@@ -51,6 +51,10 @@ Quando você fecha o Crumby (Esc, Cancel ou a bolinha vermelha), ele continua ro
 - **Sons** sintetizados (escaneamento, motor, sucção, bipes, esvaziamento), com botão de mudo.
 
 ## Versões
+
+### 1.5.3
+- Corrigido: depois de um ciclo completo, arrastar a base ou o robô deixava um tracinho azul no minimapa (o rastro da última rodada, que antes ficava escondido embaixo do robô). Agora o rastro antigo é apagado quando o robô ou a base são movidos com o ciclo já terminado.
+- Ligar ou desligar o modo de teste (arquivo `test-mode`) reinicia o Crumby sozinho.
 
 ### 1.5.2
 - Corrigido: uma travadinha depois de cada sucção. O Crumby agora fotografa os próximos ícones com antecedência, enquanto o robô ainda está longe, e o robô não para mais esperando a foto (medido no Windows: 1–3 ms por ícone, nenhum quadro travado durante a limpeza).
@@ -135,7 +139,7 @@ npm start
 npm run build:win
 ```
 
-**Modo de teste:** crie um arquivo `test-mode` com o texto `on` ao lado do `main.js` instalado (`%LOCALAPPDATA%\Crumby\<versão>\resources\app`). Nesse modo o Crumby só limpa arquivos chamados `crumby-test…`, grava um `debug.log` e se reinicia sozinho quando os arquivos dele mudam.
+**Modo de teste:** crie um arquivo `test-mode` com o texto `on` ao lado do `main.js` instalado (`%LOCALAPPDATA%\Crumby\<versão>\resources\app`). Nesse modo o Crumby só limpa arquivos chamados `crumby-test…`, grava um `debug.log` e se reinicia sozinho quando os arquivos dele mudam. Trocar o texto para `off` volta ao modo normal (o Crumby se reinicia sozinho).
 
 ## Limitações
 
