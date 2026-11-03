@@ -15,7 +15,7 @@ O Crumby não imita a área de trabalho: ele é uma janela transparente por cima
 
 - **A área de trabalho é a de sempre:** você seleciona, abre, renomeia, usa o clique direito e arrasta arquivos de outras janelas para a área de trabalho normalmente, com o Crumby aberto.
 - **O robô enxerga os ícones reais:** ele lê a posição de cada ícone várias vezes por segundo. Arquivo novo ou ícone arrastado, ele percebe na hora.
-- **Gravidade de verdade:** os ícones reais perto do robô são puxados e tremem. Nada se mexe enquanto você está arrastando algo, e ícones selecionados são deixados em paz.
+- **Gravidade de verdade:** os ícones reais perto do robô são puxados e tremem. Nada se mexe enquanto você está arrastando algo, e o ícone que você está segurando é deixado em paz.
 - **A sucção:** quando o robô engole um ícone, ele fotografa só aquele ícone, recorta usando uma foto do papel de parede tirada no começo e anima o recorte entrando no robô (cerca de 1 segundo por item). Enquanto a Lixeira trabalha, um pedaço do papel de parede cobre o ícone real até o Windows tirá-lo.
 - **Aparece em prints e gravações de tela:** o Crumby só some das capturas nos milissegundos em que fotografa um ícone.
 
@@ -51,6 +51,10 @@ Quando você fecha o Crumby (Esc, Cancel ou a bolinha vermelha), ele continua ro
 - **Sons** sintetizados (escaneamento, motor, sucção, bipes, esvaziamento), com botão de mudo.
 
 ## Versões
+
+### 1.5.1
+- Corrigido: depois da primeira limpeza, um arquivo novo solto na área de trabalho não era limpo ao clicar em **Start** (o robô saía e voltava). O Windows deixa o arquivo solto selecionado, e o robô ignorava ícones selecionados; agora ele só deixa em paz o ícone que você está segurando com o mouse.
+- Corrigido: ao arrastar a base depois da limpeza, aparecia uma linha azul no minimapa. O rastro do robô agora se interrompe quando ele é carregado (com a base ou no colo), em vez de traçar uma reta.
 
 ### 1.5
 - **Novo modelo "mascote":** a área de trabalho real fica sempre na frente e funcionando; o Crumby desenha só o robô, a base e o painel e deixa o mouse passar no resto. Dá para arrastar arquivos para a área de trabalho, selecionar, abrir e renomear com o Crumby aberto.

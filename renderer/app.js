@@ -228,7 +228,10 @@ const Snd = (() => {
 })();
 
 // ---------- the real icons ----------
-const candidate = (it) => it.st === 'floor' && !it.fixed && !it.sel;
+// a selected icon is left alone only while the mouse button is down (you're dragging it);
+// Windows keeps freshly dropped files selected, and those must still be cleaned
+const held = (it) => it.sel && S.mouseDown;
+const candidate = (it) => it.st === 'floor' && !it.fixed && !held(it);
 function newItem(r) {
   return {
     name: r.name, x: r.x, y: r.y, vx: 0, vy: 0, box: r.box || [-38, -28, 38, 52],
@@ -498,7 +501,7 @@ function update(dt) {
     if (it.st !== 'floor') continue;
     const dx = r.x - it.x, dy = r.y - it.y, d = Math.max(1, Math.hypot(dx, dy));
     it.f = 0;
-    if (pull && it.revealed && !it.fixed && !it.sel && d < G) {
+    if (pull && it.revealed && !it.fixed && !held(it) && d < G) {
       const f = 1 - d / G;
       it.f = f;
       S.near = Math.max(S.near, f);
@@ -514,7 +517,7 @@ function update(dt) {
       it.x = clamp(it.x, 30, W - 30); it.y = clamp(it.y, 30, H - 50);
       it.movedAt = S.time;
     }
-    if (suctionOn && it.revealed && !it.fixed && !it.sel && !S.busy && !S.strain && d < R * 0.85) beginSuck(it);
+    if (suctionOn && it.revealed && !it.fixed && !held(it) && !S.busy && !S.strain && d < R * 0.85) beginSuck(it);
   }
 
   // send the real icons where gravity put them (~15×/s), with a little tremble near the robot
@@ -541,7 +544,8 @@ function update(dt) {
   // trail
   if (S.running && S.state !== 'lifted') {
     const lp = S.trail[S.trail.length - 1];
-    if (!lp || Math.hypot(lp.x - r.x, lp.y - r.y) > 7) { S.trail.push({ x: r.x, y: r.y }); if (S.trail.length > 6000) S.trail.shift(); }
+    const dist = lp ? Math.hypot(lp.x - r.x, lp.y - r.y) : 0;
+    if (!lp || dist > 7) { S.trail.push({ x: r.x, y: r.y, brk: dist > 40 || !!S.trailBreak }); S.trailBreak = false; if (S.trail.length > 6000) S.trail.shift(); }
   }
   r.x = clamp(r.x, R, W - R); r.y = clamp(r.y, R, H - R);
 
@@ -742,8 +746,10 @@ function drawMap() {
   // trail: thick swath + thin line
   if (S.trail.length > 1) {
     mx.lineJoin = mx.lineCap = 'round';
-    mx.beginPath(); S.trail.forEach((p, i) => (i ? mx.lineTo(p.x * k, p.y * k) : mx.moveTo(p.x * k, p.y * k)));
-    mx.lineTo(S.robot.x * k, S.robot.y * k);
+    // a "brk" point starts a new piece: the robot was carried (dock or robot dragged), not driven
+    mx.beginPath(); S.trail.forEach((p, i) => (i && !p.brk ? mx.lineTo(p.x * k, p.y * k) : mx.moveTo(p.x * k, p.y * k)));
+    const lp = S.trail[S.trail.length - 1];
+    if (S.running && S.state !== 'lifted' && Math.hypot(lp.x - S.robot.x, lp.y - S.robot.y) < 40) mx.lineTo(S.robot.x * k, S.robot.y * k);
     mx.strokeStyle = 'rgba(70,150,165,0.32)'; mx.lineWidth = Math.max(5, R * 1.6 * k); mx.stroke();
     mx.strokeStyle = 'rgba(85,215,235,0.9)'; mx.lineWidth = 1.1; mx.stroke();
   }
@@ -894,8 +900,8 @@ function bindUI() {
     cv.style.cursor = 'grabbing';
     if (d.kind === 'dock') {
       S.dock.x = x - d.dx; S.dock.y = y - d.dy; clampDock();
-      if (d.carry) { const p = dockedPos(); S.robot.x = p.x; S.robot.y = p.y; }
-    } else { S.robot.x = x - d.dx; S.robot.y = y - d.dy; }
+      if (d.carry) { const p = dockedPos(); S.robot.x = p.x; S.robot.y = p.y; S.trailBreak = true; }
+    } else { S.robot.x = x - d.dx; S.robot.y = y - d.dy; S.trailBreak = true; }
   });
   const release = (e) => {
     const d = S.drag; if (!d) return; S.drag = null; cv.style.cursor = 'default';
