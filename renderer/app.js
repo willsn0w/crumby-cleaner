@@ -1,5 +1,7 @@
 'use strict';
-/* Crumby — renderer: the floor, the robot, the dock and the control panel. */
+/* Crumby — renderer. A desktop pet: the real desktop stays in charge underneath.
+   This window draws only the robot, its dock, the panel, and the photo of the icon being swallowed.
+   Everywhere else the mouse passes straight through to Windows. */
 
 const $ = (id) => document.getElementById(id);
 const TAU = Math.PI * 2;
@@ -7,7 +9,7 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, t) => a + (b - a) * t;
 const angDiff = (a, b) => { let d = (a - b) % TAU; if (d > Math.PI) d -= TAU; if (d < -Math.PI) d += TAU; return d; };
 
-const PREVIEW = !window.crumby; // opened outside the app (browser preview / tests)
+const PREVIEW = !window.crumby; // opened outside the app (browser preview / tests): fake icons are drawn
 
 // ---------- geometry ----------
 const R = 44;                       // robot radius (px)
@@ -16,6 +18,7 @@ const DOCK_K = DOCK_W / 140;        // dock.svg units -> px
 const DOCK_H = 190 * DOCK_K;
 const SPEED = 175;
 const ITEM_BOX_W = 76;
+const G = R * 3.2;                  // reach of the vacuum's pull
 
 const cv = $('floor');
 const ctx = cv.getContext('2d');
@@ -96,18 +99,18 @@ function itemSprite(it, iconImg) {
 
 // ---------- state ----------
 const S = {
-  items: [], total: 0, totalBytes: 0, binCap: 0.72,
+  items: [], total: 0, binCap: 0.72, N0: 1, B0: 0,
   robot: { x: 0, y: 0, a: -Math.PI / 2, moving: false, brush: 0, kx: 0, ky: 0, wob: 0 },
   dock: { x: 0, y: 0 },
   state: 'confirm', stateT: 0, homeReason: null,
   mapped: false, beamA: 0, beamStart: 0, beamSwept: 0,
   battery: 100, binLoad: 0, collected: 0, bytes: 0, elapsed: 0, running: false,
-  paused: false, muted: false, stopped: false,
-  target: null, strain: null, flash: null,
-  trail: [], drag: null, time: 0,
+  paused: false, muted: false, testMode: false,
+  target: null, strain: null, busy: null, flash: null, near: 0, mouseDown: false,
+  trail: [], drag: null, time: 0, spits: [], patches: [],
 };
+const byName = new Map();
 
-// the dock stays inside the work area (never under the taskbar) and leaves room to back in
 function clampDock() {
   S.dock.x = clamp(S.dock.x, 0, W - DOCK_W);
   S.dock.y = clamp(S.dock.y, R * 2 + 6, H - DOCK_H);
@@ -117,7 +120,6 @@ const hitDock = (x, y) => x >= S.dock.x && x <= S.dock.x + DOCK_W && y >= S.dock
 const dockedPos = () => ({ x: S.dock.x + DOCK_W / 2, y: S.dock.y + 55 * DOCK_K });
 const approachPos = () => ({ x: S.dock.x + DOCK_W / 2, y: S.dock.y - R * 0.95 });
 const binPct = () => clamp(S.binLoad / S.binCap * 100, 0, 100);
-
 function setState(s) { S.state = s; S.stateT = 0; }
 function goHome(reason) { S.homeReason = reason; S.target = null; setState('home'); }
 
@@ -225,104 +227,75 @@ const Snd = (() => {
   };
 })();
 
-// ---------- setup ----------
-function mockItems() {
-  // preview data: a messy desktop with 42 things
-  const names = ['notes copy 2.txt', 'Screenshot 2026-10-19 at 14.07.08.png', 'invoice-sample.pdf', 'budget-snacks.xlsx', 'New Folder', 'q3-slides-actually-final.pptx',
-    'wallpaper-idea.png', 'demo-for-nobody.mp4', 'logo-new-NEW.png', 'final-final-v2.pdf', 'voice-memo-idea.m4a', 'old-site.zip', 'IMG_2042.png', 'desktop-cleaning',
-    'untitled folder', 'backup.zip', 'todo.txt', 'resume (3).docx', 'Screenshot 2026-10-21.png', 'cat.gif', 'stuff', 'video-export.mov', 'readme.md', 'tax-2025.pdf',
-    'design-v7.fig', 'Untitled.txt', 'photo.jpg', 'archive', 'meeting-notes.txt', 'Recording 01.mp4', 'icons', 'export (1).csv', 'draft.docx', 'IMG_1999.jpg',
-    'temp', 'presentation.key', 'node-installer.msi', 'hello.py', 'Screenshot (88).png', 'random.json', 'mockup.png', 'Recycle Bin'];
-  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  return names.map((name, i) => {
-    const kind = name === 'Recycle Bin' ? 'system' : /\.(png|jpg|gif)$/.test(name) ? 'image' : /\./.test(name) ? 'file' : 'folder';
-    const cluster = i < 26;
-    const x = cluster ? W * 0.32 + rnd() * W * 0.3 : (i % 2 ? W - 60 - rnd() * 40 : 50 + rnd() * W * 0.18);
-    const y = cluster ? H * 0.2 + rnd() * H * 0.38 : 60 + rnd() * (H - 200);
-    const big = /mp4|mov|zip|msi/.test(name);
-    return { name, x, y, iconSize: 48, kind, icon: null, size: Math.round((big ? 600e6 + rnd() * 2.4e9 : rnd() * 9e7)) };
-  });
+// ---------- the real icons ----------
+const candidate = (it) => it.st === 'floor' && !it.fixed && !it.sel;
+function newItem(r) {
+  return {
+    name: r.name, x: r.x, y: r.y, vx: 0, vy: 0, box: r.box || [-38, -28, 38, 52],
+    kind: r.kind, size: r.size || 0, sel: false, fixed: false, refused: false,
+    st: 'floor', revealed: S.mapped, glow: S.mapped ? 1 : 0, movedAt: -9, sent: { x: r.x, y: r.y },
+    t: 0, dur: 0, rot: 0, sx: 0, sy: 0, warp: 0, warpA: 0, phase: Math.random() * TAU,
+    spin: (Math.random() < 0.5 ? -1 : 1) * (0.6 + Math.random() * 0.7), iconSize: 48,
+  };
 }
-
-// (re)load the desktop icons onto the floor
-async function loadItems(raw, append = false) {
-  if (append) { // files dropped onto the desktop while Crumby is open
-    const N = Math.max(1, S.items.length + raw.length);
-    for (const r of raw) {
-      const it = await makeItem(r, N, Math.max(150e6, ...S.items.filter((i) => i.big).map((i) => i.size)));
-      it.revealed = S.mapped || S.state !== 'mapping'; it.glow = 1;
-      S.items.push(it);
-      if (!it.fixed) S.total++;
+// a fresh look at the real desktop (several times a second)
+function onScan(data) {
+  S.mouseDown = !!data.mouseDown;
+  const seen = new Set();
+  for (const r of data.items) {
+    seen.add(r.name);
+    let it = byName.get(r.name);
+    if (!it || it.st === 'gone') {
+      if (it) S.items.splice(S.items.indexOf(it), 1);
+      it = newItem(r);
+      byName.set(r.name, it); S.items.push(it);
+      if (PREVIEW) it.sprite = itemSprite(it, genericIcon(it.kind, 48));
     }
-    $('countOf').textContent = `of ${S.total} items`;
-    if (S.state === 'confirm') refreshConfirm();
-    return;
+    if (it.st !== 'floor') continue; // being swallowed: its real icon is parked off-screen
+    it.box = r.box || it.box; it.sel = !!r.sel; it.kind = r.kind; it.size = r.size || 0;
+    it.fixed = !r.canTrash || it.refused || refused.has(r.name);
+    if (S.time - it.movedAt > 0.8) { // nobody (robot) touched it lately: Windows is the truth (user drags etc.)
+      it.x = r.x; it.y = r.y; it.vx = it.vy = 0; it.sent = { x: r.x, y: r.y };
+    }
   }
-  S.items = [];
-  S.totalBytes = raw.reduce((a, b) => a + (b.size || 0), 0);
-  const sizes = raw.map((r) => r.size || 0).sort((a, b) => b - a);
-  const bigCut = Math.max(150e6, sizes[Math.floor(sizes.length * 0.12)] || Infinity);
-  const N = raw.length;
-  S.binCap = N >= 6 ? 0.72 : 1.01;
-
-  for (const r of raw) S.items.push(await makeItem(r, N, bigCut));
-  S.total = S.items.filter((i) => !i.fixed).length;
+  for (const it of S.items.slice()) {
+    if ((it.st === 'floor' || (it.st === 'sucked' && it.counted)) && !seen.has(it.name)) { // deleted/moved away by the user
+      S.items.splice(S.items.indexOf(it), 1); byName.delete(it.name);
+      if (S.target === it) S.target = null;
+    }
+  }
+  recount();
+}
+function recount() {
+  const left = S.items.filter((i) => candidate(i) || i.st === 'busy' || i.st === 'suck' || i.st === 'sucked').length;
+  S.total = S.collected + left;
   $('countOf').textContent = `of ${S.total} items`;
-  refreshConfirm();
+  if (S.state === 'confirm') refreshConfirm();
 }
-
 function refreshConfirm() {
-  const tb = S.items.filter((i) => !i.fixed && i.st !== 'gone').reduce((a, i) => a + i.size, 0);
-  $('confirmText').innerHTML = S.total
-    ? `<b>${S.total} ${S.total === 1 ? 'item' : 'items'}</b> (${fmtBytes(tb)}) will be moved to the <b>Recycle Bin</b>. You can restore them from there.`
+  const c = S.items.filter((i) => i.st === 'floor' && !i.fixed);
+  const tb = c.reduce((a, i) => a + i.size, 0);
+  $('confirmText').innerHTML = c.length
+    ? `<b>${c.length} ${c.length === 1 ? 'item' : 'items'}</b> (${fmtBytes(tb)}) will be moved to the <b>Recycle Bin</b>. You can restore them from there.`
+      + (S.testMode ? '<br><span class="test">Test mode: only files named crumby-test… are cleaned.</span>' : '')
     : 'Your desktop is already clean.';
-  $('startBtn').disabled = !S.total;
+  $('startBtn').disabled = !c.length;
 }
-
-async function makeItem(r, N, bigCut) {
-    const icon = r.icon ? await loadImg(r.icon) : null;
-    const it = {
-      id: r.id != null ? r.id : S.items.length, name: r.name, kind: r.kind, size: r.size || 0, iconSize: r.iconSize || 48,
-      fixed: r.canTrash === false || (r.canTrash == null && r.kind === 'system'),
-      x: clamp(r.x, 20, W - 20), y: clamp(r.y, 20, H - 40), vx: 0, vy: 0,
-      st: 'floor', revealed: false, glow: 0, t: 0, dur: 0, rot: 0, sx: 0, sy: 0,
-      rv: 0, rest: 0, warp: 0, warpA: 0, tumbled: false, thrown: false, phase: Math.random() * TAU,
-      spin: (Math.random() < 0.5 ? -1 : 1) * (0.6 + Math.random() * 0.7),
-      big: (r.size || 0) >= bigCut,
-      load: 0.5 / Math.max(1, N) + 0.5 * (S.totalBytes > 0 ? (r.size || 0) / S.totalBytes : 1 / Math.max(1, N)),
-    };
-    it.canTrash = !it.fixed;
-    const shot = r.sprite ? await loadImg(r.sprite.url) : null;
-    it.sprite = shot
-      ? { canvas: shot, w: r.sprite.w, h: r.sprite.h, ax: r.sprite.ax, ay: r.sprite.ay } // pixel-exact copy of the real icon + name
-      : itemSprite(it, icon || genericIcon(it.kind, it.iconSize));
-    return it;
+function loadOf(it) {
+  return 0.5 / Math.max(1, S.N0) + 0.5 * (S.B0 > 0 ? Math.min(1, it.size / S.B0) : 1 / Math.max(1, S.N0));
 }
+const isBig = (it) => it.size >= 300e6;
 
-async function setup() {
-  if (PREVIEW) document.body.classList.add('preview');
-  resize();
-  const data = PREVIEW ? { items: mockItems() } : await window.crumby.init();
-  if (data.bg) document.body.style.background = `#000 url("${data.bg}") 0 0 / 100% 100% no-repeat`;
-
-  const [rImg, dImg] = await Promise.all([loadImg('assets/robot.svg'), loadImg('assets/dock.svg')]);
-  robotSprite = raster(rImg, R * 2, R * 2);
-  dockSprite = raster(dImg, DOCK_W, DOCK_H);
-
-  S.dock.x = Math.round(W * 0.82 - DOCK_W / 2);
-  S.dock.y = Math.round(H - DOCK_H - 4);
-  let saved = data.dock;
-  if (!saved && PREVIEW) { try { saved = JSON.parse(localStorage.getItem('crumby.dock') || 'null'); } catch (e) {} }
-  if (saved) { S.dock.x = saved.x; S.dock.y = saved.y; }
-  clampDock();
-  const dp = dockedPos(); S.robot.x = dp.x; S.robot.y = dp.y;
-
-  await loadItems(data.items || []);
-
-  bindUI();
-  if (!PREVIEW) window.crumby.ready();
-  last = performance.now();
-  requestAnimationFrame(frame);
+function startRun() {
+  const c = S.items.filter((i) => i.st === 'floor' && !i.fixed);
+  S.N0 = c.length; S.B0 = c.reduce((a, i) => a + i.size, 0);
+  S.binCap = S.N0 >= 6 ? 0.72 : 1.01;
+  S.collected = 0; S.bytes = 0; S.elapsed = 0; S.trail = [];
+  S.mapped = false; S.homeReason = null; S.target = null; S.strain = null; S.running = true;
+  S.items.forEach((i) => { i.revealed = false; });
+  if (!PREVIEW) window.crumby.wallpaper(); // the bare wallpaper, for clean cut-outs
+  Snd.init(); setState('boot'); S.stateT = 1.0;
+  recount();
 }
 
 // ---------- simulation ----------
@@ -341,18 +314,17 @@ function driveTo(tx, ty, dt, speed = SPEED, arrive = 5) {
   }
   return false;
 }
+
 function turnTo(a, dt) {
   const r = S.robot, da = angDiff(a, r.a);
   r.a += clamp(da, -3.6 * dt, 3.6 * dt); r.moving = true;
   return Math.abs(da) < 0.02;
 }
 
-function floorItems() { return S.items.filter((i) => i.st === 'floor' && !i.fixed); }
-
 function pickTarget() {
   const r = S.robot; let best = null, bc = Infinity;
   for (const it of S.items) {
-    if (it.st !== 'floor' || !it.revealed || it.fixed || it === S.selected) continue;
+    if (!candidate(it) || !it.revealed) continue;
     const d = Math.hypot(it.x - r.x, it.y - r.y);
     const c = d + 55 * Math.abs(angDiff(Math.atan2(it.y - r.y, it.x - r.x), r.a));
     if (c < bc) { bc = c; best = it; }
@@ -360,40 +332,63 @@ function pickTarget() {
   return best;
 }
 
-function startSuck(it) {
-  it.st = 'suck'; it.t = 0; it.sx = it.x; it.sy = it.y;
-  it.dur = it.big ? 2.2 : 0.42;
-  if (it.big) S.strain = it;
-  Snd.pop(it.big);
+// swallowing one real icon: photo + cut-out (fast) -> animation at once; a wallpaper patch hides the
+// real icon until Windows has moved the file to the Recycle Bin and removed it
+async function beginSuck(it) {
+  it.st = 'busy'; S.busy = it; if (S.target === it) S.target = null;
+  it.vx = it.vy = 0;
+  try {
+    if (!PREVIEW) {
+      const c = await window.crumby.lift(it.name);
+      if (c && c.sprite) { const img = await loadImg(c.sprite.url); if (img) it.sprite = { canvas: img, w: c.sprite.w, h: c.sprite.h, ax: c.sprite.ax, ay: c.sprite.ay }; }
+      if (c && c.patch) { const img = await loadImg(c.patch.url); if (img) it.patch = { canvas: img, w: c.patch.w, h: c.patch.h, ax: c.patch.ax, ay: c.patch.ay, x: it.x, y: it.y }; }
+    }
+    if (!it.sprite) throw new Error('no photo');
+    it.st = 'suck'; it.t = 0; it.sx = it.x; it.sy = it.y; it.ox = it.x; it.oy = it.y;
+    it.big = isBig(it); it.dur = it.big ? 2.2 : 0.42;
+    if (it.big) S.strain = it;
+    if (it.patch) S.patches.push(it.patch);
+    Snd.pop(it.big);
+    S.busy = null;
+    const res = PREVIEW ? { ok: true } : await window.crumby.trash(it.name);
+    const k = S.patches.indexOf(it.patch); if (k >= 0) S.patches.splice(k, 1); // the real icon is gone (or back)
+    if (res && res.ok) {
+      it.trashed = true;
+      if (it.st === 'sucked') countIt(it);
+    } else {
+      // Windows refused (in use, no permission…): the robot coughs it back up
+      it.refused = true;
+      S.flash = { text: `Can't recycle "${it.name}"`, until: S.time + 2.5 };
+      Snd.thud();
+      if (S.strain === it) S.strain = null;
+      it.st = 'gone';
+      byName.delete(it.name);
+      const j = S.items.indexOf(it); if (j >= 0) S.items.splice(j, 1);
+      S.spits.push({ sprite: it.sprite, x: S.robot.x, y: S.robot.y, tx: it.ox, ty: it.oy, t: 0 });
+      refused.add(it.name);
+    }
+  } catch (e) {
+    it.st = 'floor'; it.refused = true; it.fixed = true;
+  }
+  if (S.busy === it) S.busy = null;
+  recount();
 }
-
+const refused = new Set();
+function countIt(it) {
+  if (it.counted) return;
+  it.counted = true;
+  S.collected++; S.bytes += it.size; S.binLoad += loadOf(it);
+  byName.delete(it.name);
+  const k = S.items.indexOf(it); if (k >= 0) S.items.splice(k, 1);
+  recount();
+}
 function finishSuck(it) {
   if (S.strain === it) S.strain = null;
-  if (S.target === it) S.target = null;
-  it.st = 'pending';
-  const job = PREVIEW ? Promise.resolve({ ok: true }) : window.crumby.trash(it.id);
-  job.then((res) => {
-    if (res && res.ok) {
-      it.st = 'gone';
-      S.collected++; S.bytes += it.size; S.binLoad += it.load;
-    } else spitOut(it, res && res.error);
-  }, (e) => spitOut(it, String(e)));
+  it.st = 'sucked'; // gone from view; counted as soon as the Recycle Bin confirms
+  if (it.trashed) countIt(it);
 }
 
-// Windows refused (file in use, no permission...): the robot coughs it back up and leaves it alone
-function spitOut(it, why) {
-  const r = S.robot;
-  const a = r.a + Math.PI + (Math.random() - 0.5) * 1.2;
-  it.st = 'floor'; it.fixed = true; it.warp = 0;
-  it.x = r.x + Math.cos(a) * (R + 10); it.y = r.y + Math.sin(a) * (R + 10);
-  it.vx = Math.cos(a) * 420; it.vy = Math.sin(a) * 420; it.rv = it.spin * 12;
-  S.total = Math.max(0, S.total - 1); $('countOf').textContent = `of ${S.total} items`;
-  S.flash = { text: `Can't recycle "${it.name}"`, until: S.time + 2.5 };
-  Snd.thud();
-  if (why) console.warn('trash failed:', it.name, why);
-}
-
-function revealSweep(prevSwept) {
+function revealSweep() {
   const r = S.robot;
   for (const it of S.items) {
     if (it.revealed) continue;
@@ -402,19 +397,13 @@ function revealSweep(prevSwept) {
   }
 }
 
+let moveT = 0;
 function update(dt) {
   S.time += dt;
   const r = S.robot;
   r.moving = false;
   S.stateT += dt;
   if (S.flash && S.time > S.flash.until) S.flash = null;
-  if (S.selected && (S.time - S.selectedAt > 5 || S.selected.st !== 'floor')) S.selected = null;
-
-  // kick from a thrown icon
-  if (Math.abs(r.kx) + Math.abs(r.ky) > 1) {
-    r.x += r.kx * dt; r.y += r.ky * dt;
-    const k = Math.exp(-5 * dt); r.kx *= k; r.ky *= k;
-  } else { r.kx = r.ky = 0; }
   r.wob *= Math.exp(-4 * dt);
 
   switch (S.state) {
@@ -440,20 +429,17 @@ function update(dt) {
       break;
     }
     case 'cleaning': {
-      if (S.strain) { // halt and strain on a big file
-        r.moving = false;
-        break;
-      }
-      if (!S.target || S.target.st !== 'floor') S.target = pickTarget();
+      if (S.strain || S.busy) { r.moving = false; break; } // swallowing
+      if (!S.target || !candidate(S.target)) S.target = pickTarget();
       if (!S.target) {
-        if (!S.items.some((i) => ((i.st === 'floor' || i.st === 'held') && !i.fixed) || i.st === 'suck' || i.st === 'pending')) goHome('done');
+        if (!S.items.some((i) => candidate(i) || i.st === 'busy' || i.st === 'suck' || i.st === 'sucked')) goHome('done');
         break;
       }
       driveTo(S.target.x, S.target.y, dt, SPEED, 2);
       break;
     }
     case 'home': {
-      if (S.strain) break;
+      if (S.strain || S.busy) break;
       const ap = approachPos();
       if (driveTo(ap.x, ap.y, dt, SPEED, 4)) setState('align');
       break;
@@ -476,10 +462,11 @@ function update(dt) {
       break;
     }
     case 'docked': {
-      const left = floorItems().length;
+      const left = S.items.filter(candidate).length;
       if (S.homeReason === 'done' || S.homeReason === 'stop' || left === 0) {
         setState(S.homeReason === 'stop' ? 'stopped' : 'done');
         S.running = false; if (S.state === 'done') Snd.done();
+        if (!PREVIEW) window.crumby.refresh();
       } else if (S.battery < 40) setState('charging');
       else { Snd.chirp(true); setState('undock'); }
       break;
@@ -487,7 +474,7 @@ function update(dt) {
     case 'charging':
       if (S.battery >= 90) { Snd.chirp(true); setState('undock'); }
       break;
-    case 'halted': // Stop pressed: robot sits still until Resume
+    case 'halted':
       r.moving = false;
       break;
     case 'lifted': case 'done': case 'stopped':
@@ -496,69 +483,60 @@ function update(dt) {
   if (S.state === 'mapping') Snd.scanStart(); else Snd.scanStop();
 
   // battery
-  const atDock = ['confirm', 'boot', 'emptying', 'docked', 'charging', 'done', 'stopped'].includes(S.state);
+  const atDock = ON_DOCK.includes(S.state);
   if (atDock) S.battery = Math.min(100, S.battery + 3.2 * dt);
   else if (S.state !== 'lifted' && S.state !== 'halted') S.battery = Math.max(1, S.battery - (S.strain ? 0.45 : 0.16) * dt);
-  if (S.state === 'cleaning' && S.battery < 15) goHome('battery');
+  if (S.state === 'cleaning' && S.battery < 15 && !S.busy) goHome('battery');
 
-  // items: gravity well around the robot, thrown physics, suction, reveal glow
+  // gravity on the real icons: they drift in and tremble; nothing moves while you're dragging something
   const suctionOn = ['cleaning', 'home', 'undock'].includes(S.state);
-  const G = R * 3.4; // reach of the vacuum's pull
+  const pull = suctionOn && !S.mouseDown && !S.busy;
   S.near = 0;
   for (const it of S.items) {
     if (it.glow > 0) it.glow = Math.max(0, it.glow - dt * 0.9);
-    if (it.st === 'floor') {
-      const dx = r.x - it.x, dy = r.y - it.y, d = Math.max(1, Math.hypot(dx, dy));
-      if (suctionOn && it.revealed && !it.fixed && it !== S.selected && d < G) {
-        const f = 1 - d / G; // 0 at the edge, 1 under the robot
-        S.near = Math.max(S.near, f);
-        // bend toward the robot
-        it.warp = Math.max(it.warp, f);
-        it.warpA = Math.atan2(dy, dx);
-        // gravity: drift in, with a swirl around the robot
-        const a = f * f * 340;
-        it.vx += ((dx / d) * a + (-dy / d) * a * 0.55 * it.spin) * dt;
-        it.vy += ((dy / d) * a + (dx / d) * a * 0.55 * it.spin) * dt;
-        // torque: twist, and sometimes flip upside down and stay that way
-        it.rv += it.spin * f * f * 14 * dt;
-        if (!it.tumbled && f > 0.42 && Math.random() < dt * 1.6) {
-          it.tumbled = true;
-          it.rest = Math.random() < 0.45 ? Math.PI : it.spin * (0.25 + Math.random() * 0.6);
-          it.rv += it.spin * 9;
-        }
-      }
-      it.warp = Math.max(0, it.warp - dt * 1.8);
-      it.x = clamp(it.x, 24, W - 24); it.y = clamp(it.y, 24, H - 40); // never off the desktop
-      // rotation spring toward its resting angle
-      it.rv += angDiff(it.rest, it.rot) * 9 * dt;
-      it.rv *= Math.exp(-3.2 * dt);
-      it.rot += it.rv * dt;
-
-      if (it.vx || it.vy) {
-        it.x += it.vx * dt; it.y += it.vy * dt;
-        const k = Math.exp(-2.6 * dt); it.vx *= k; it.vy *= k;
-        if (it.x < 24 || it.x > W - 24) { it.vx *= -0.6; it.x = clamp(it.x, 24, W - 24); }
-        if (it.y < 24 || it.y > H - 40) { it.vy *= -0.6; it.y = clamp(it.y, 24, H - 40); }
-        const sp = Math.hypot(it.vx, it.vy);
-        if (sp < 6) { it.vx = it.vy = 0; it.thrown = false; }
-        if (it.thrown && !it.fixed && sp > 180 && d < R + 18 && S.state !== 'lifted') { // hit the robot!
-          r.kx = it.vx * 0.35; r.ky = it.vy * 0.35; r.wob = 1;
-          S.flash = { text: 'Ouch.', until: S.time + 1.2 };
-          Snd.thud(); it.vx = it.vy = 0; it.thrown = false; it.revealed = true; startSuck(it);
-        }
-      }
-      if (it.st === 'floor' && suctionOn && it.revealed && !it.fixed && it !== S.selected && !S.strain) {
-        const d2 = Math.hypot(it.x - r.x, it.y - r.y);
-        if (d2 < R * 0.85) startSuck(it);
-      }
-    } else if (it.st === 'suck') {
-      it.t += dt / it.dur;
-      if (it.t >= 1) finishSuck(it);
+    if (it.st === 'suck') { it.t += dt / it.dur; if (it.t >= 1) finishSuck(it); continue; }
+    if (it.st !== 'floor') continue;
+    const dx = r.x - it.x, dy = r.y - it.y, d = Math.max(1, Math.hypot(dx, dy));
+    it.f = 0;
+    if (pull && it.revealed && !it.fixed && !it.sel && d < G) {
+      const f = 1 - d / G;
+      it.f = f;
+      S.near = Math.max(S.near, f);
+      const a = f * f * 260;
+      it.vx += ((dx / d) * a + (-dy / d) * a * 0.5 * it.spin) * dt;
+      it.vy += ((dy / d) * a + (dx / d) * a * 0.5 * it.spin) * dt;
     }
+    if (it.vx || it.vy) {
+      if (S.mouseDown) { it.vx = it.vy = 0; continue; }
+      it.x += it.vx * dt; it.y += it.vy * dt;
+      const k = Math.exp(-3 * dt); it.vx *= k; it.vy *= k;
+      if (Math.hypot(it.vx, it.vy) < 4) it.vx = it.vy = 0;
+      it.x = clamp(it.x, 30, W - 30); it.y = clamp(it.y, 30, H - 50);
+      it.movedAt = S.time;
+    }
+    if (suctionOn && it.revealed && !it.fixed && !it.sel && !S.busy && !S.strain && d < R * 0.85) beginSuck(it);
   }
 
-  // bin full?
-  if (S.state === 'cleaning' && binPct() >= 100 && !S.strain) goHome('bin');
+  // send the real icons where gravity put them (~15×/s), with a little tremble near the robot
+  moveT += dt;
+  if (moveT > 0.066 && !PREVIEW) {
+    moveT = 0;
+    const list = [];
+    for (const it of S.items) {
+      if (it.st !== 'floor' || S.mouseDown) continue;
+      const j = (it.f || 0) * 2.2;
+      const tx = it.x + Math.sin(S.time * 41 + it.phase) * j, ty = it.y + Math.cos(S.time * 37 + it.phase) * j;
+      if (Math.abs(tx - it.sent.x) >= 1 || Math.abs(ty - it.sent.y) >= 1) {
+        list.push({ name: it.name, x: tx, y: ty }); it.sent = { x: tx, y: ty }; it.movedAt = S.time;
+      }
+    }
+    if (list.length) window.crumby.move(list);
+  }
+
+  for (const sp of S.spits) sp.t += dt / 0.45;
+  S.spits = S.spits.filter((sp) => sp.t < 1);
+
+  if (S.state === 'cleaning' && binPct() >= 100 && !S.strain && !S.busy) goHome('bin');
 
   // trail
   if (S.running && S.state !== 'lifted') {
@@ -568,9 +546,9 @@ function update(dt) {
   r.x = clamp(r.x, R, W - R); r.y = clamp(r.y, R, H - R);
 
   if (S.running && !['done', 'stopped', 'halted'].includes(S.state)) S.elapsed += dt;
-  r.brush += dt * (r.moving || S.state === 'mapping' || S.strain ? 16 : 0);
+  r.brush += dt * (r.moving || S.state === 'mapping' || S.strain || S.busy ? 16 : 0);
 
-  const motorLevel = S.state === 'lifted' ? 0.35 : (S.strain ? 1.2 : (r.moving ? 1 : (S.state === 'mapping' ? 0.45 : 0)));
+  const motorLevel = S.state === 'lifted' ? 0.35 : (S.strain || S.busy ? 1.2 : (r.moving ? 1 : (S.state === 'mapping' ? 0.45 : 0)));
   Snd.motor(motorLevel, S.strain ? 1 : 0, suctionOn ? S.near : 0);
 }
 
@@ -653,6 +631,21 @@ function drawItem(it) {
   ctx.restore();
 }
 
+// the cyan glow the lidar leaves on each icon it finds
+function drawGlow(it) {
+  if (it.glow <= 0 || it.st !== 'floor') return;
+  const b = it.box;
+  ctx.save();
+  ctx.globalAlpha = it.glow * 0.7;
+  ctx.fillStyle = 'rgba(80,230,255,0.22)'; ctx.strokeStyle = 'rgba(120,240,255,0.9)'; ctx.lineWidth = 1.5;
+  ctx.shadowColor = '#3fe0ff'; ctx.shadowBlur = 16;
+  ctx.beginPath(); ctx.roundRect(it.x + b[0], it.y + b[1], b[2] - b[0], b[3] - b[1], 6); ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
+function drawPlaceholder(it) {
+  if (!it.ph) return;
+  ctx.drawImage(it.ph.canvas, it.x - it.ph.ax, it.y - it.ph.ay, it.ph.w, it.ph.h);
+}
 function drawBeam() {
   const r = S.robot, L = Math.hypot(W, H);
   ctx.save();
@@ -716,12 +709,20 @@ function drawRobot() {
 function draw() {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.clearRect(0, 0, W, H);
+  if (PREVIEW) for (const it of S.items) if (it.st === 'floor' && it.sprite) drawItem(it); // fake desktop for previews
   drawDock();
-  for (const it of S.items) if (it.st === 'floor') drawItem(it);
+  for (const p of S.patches) ctx.drawImage(p.canvas, p.x - p.ax, p.y - p.ay, p.w, p.h); // real icon on its way out
+  for (const it of S.items) drawGlow(it);
+  for (const it of S.items) if (it.st === 'busy') drawPlaceholder(it);
   if (S.state === 'mapping') drawBeam();
-  for (const it of S.items) if (it.st === 'suck') drawItem(it);
+  for (const it of S.items) if (it.st === 'suck' && it.sprite) drawItem(it);
   drawRobot();
-  for (const it of S.items) if (it.st === 'held') drawItem(it);
+  for (const sp of S.spits) { // a refused file flying back to its place
+    const e = 1 - (1 - sp.t) * (1 - sp.t), x = lerp(sp.x, sp.tx, e), y = lerp(sp.y, sp.ty, e), k = 0.2 + 0.8 * e;
+    ctx.save(); ctx.translate(x, y); ctx.rotate((1 - e) * 6); ctx.scale(k, k);
+    ctx.drawImage(sp.sprite.canvas, -sp.sprite.ax, -sp.sprite.ay, sp.sprite.w, sp.sprite.h);
+    ctx.restore();
+  }
   drawMap();
 }
 
@@ -791,6 +792,8 @@ function statusText() {
   }
   return '';
 }
+
+const CAN_RUN_AGAIN = ['done', 'stopped'];
 let uiT = 0;
 function updatePanel(dt) {
   uiT += dt; if (uiT < 0.08) return; uiT = 0;
@@ -804,79 +807,47 @@ function updatePanel(dt) {
   $('size').textContent = fmtBytes(S.bytes);
   $('time').textContent = fmtTime(S.elapsed);
   const halted = S.state === 'halted';
-  $('stop').disabled = ['done', 'boot', 'confirm'].includes(S.state);
+  $('stop').disabled = ['done', 'boot', 'confirm', 'stopped'].includes(S.state);
   document.body.classList.toggle('confirming', S.state === 'confirm');
   $('stopIcon').innerHTML = halted ? '&#9654;' : '&#10005;';
   $('stopText').textContent = halted ? 'Resume' : 'Stop';
   $('stop').classList.toggle('resume', halted);
   const again = CAN_RUN_AGAIN.includes(S.state);
-  $('pause').disabled = S.state === 'halted' || rescanning;
+  $('pause').disabled = halted;
   $('pause').classList.toggle('resume', again);
   if (again) { $('pauseIcon').innerHTML = '&#9654;'; $('pauseText').textContent = 'Start'; }
   else if (!S.paused) { $('pauseIcon').innerHTML = '&#10074;&#10074;'; $('pauseText').textContent = 'Pause'; }
 }
 
 // ---------- input ----------
-function hitItem(x, y) {
-  for (let i = S.items.length - 1; i >= 0; i--) {
-    const it = S.items[i];
-    if (it.st !== 'floor') continue;
-    const sp = it.sprite;
-    if (x >= it.x - sp.ax && x <= it.x - sp.ax + sp.w && y >= it.y - sp.ay && y <= it.y - sp.ay + sp.h) return it;
-  }
-  return null;
-}
-const CAN_RUN_AGAIN = ['done', 'stopped'];
-let rescanning = false;
-async function runAgain() {
-  if (rescanning) return;
-  rescanning = true;
-  $('pause').disabled = true;
-  try {
-    const data = PREVIEW ? { items: mockItems() } : await window.crumby.rescan(currentPositions());
-    await loadItems(data.items || []);
-  } finally { rescanning = false; }
-  S.collected = 0; S.bytes = 0; S.elapsed = 0; S.trail = [];
-  S.mapped = false; S.homeReason = null; S.target = null; S.strain = null; S.running = true;
-  Snd.init(); setState('boot'); S.stateT = 1.0;
-}
+function quit() { if (PREVIEW) location.reload(); else window.crumby.quit(); }
 
-function currentPositions() {
-  return S.items.filter((i) => i.st === 'floor' || i.st === 'held').map((i) => ({ id: i.id, x: i.x, y: i.y }));
+// the window only takes the mouse over the robot, the dock and the panel
+let interactive = false;
+function setInteractive(on) {
+  if (on === interactive) return;
+  interactive = on;
+  if (!PREVIEW) window.crumby.interactive(on);
 }
-function quit() { if (PREVIEW) location.reload(); else window.crumby.quit(currentPositions()); }
-
-function selectItem(it) { S.selected = it; S.selectedAt = S.time; }
-function setProtected(it, on) {
-  if (!it.canTrash) return;
-  if (on && !it.fixed) { it.fixed = true; S.total = Math.max(0, S.total - 1); S.flash = { text: `Protected "${it.name}"`, until: S.time + 1.6 }; }
-  else if (!on && it.fixed) { it.fixed = false; S.total++; }
-  $('countOf').textContent = `of ${S.total} items`;
-  if (S.target === it) S.target = null;
+function overUs(x, y) {
+  const p = $('panel').getBoundingClientRect();
+  if (x >= p.left - 2 && x <= p.right + 2 && y >= p.top - 2 && y <= p.bottom + 2) return true;
+  return Math.hypot(x - S.robot.x, y - S.robot.y) < R + 2 || hitDock(x, y);
 }
 
 function bindUI() {
   addEventListener('resize', resize);
   addEventListener('keydown', (e) => { if (e.key === 'Escape') quit(); });
-  if (!PREVIEW && window.crumby.onEsc) window.crumby.onEsc(quit);
-  // a file dragged in from another window: step aside so the real desktop receives it
-  addEventListener('dragenter', (e) => {
-    if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes('Files')) return;
-    e.preventDefault();
-    if (!PREVIEW) window.crumby.dragIn(currentPositions());
-  });
-  addEventListener('dragover', (e) => e.preventDefault());
-  addEventListener('drop', (e) => e.preventDefault()); // never navigate to a dropped file
-  if (!PREVIEW && window.crumby.onAdded) window.crumby.onAdded((items) => loadItems(items, true));
+  addEventListener('mousemove', (e) => { if (!S.drag && !panelDrag) setInteractive(overUs(e.clientX, e.clientY)); });
   $('close').addEventListener('click', quit);
-  $('startBtn').addEventListener('click', () => { Snd.init(); setState('boot'); S.stateT = 1.0; });
+  $('startBtn').addEventListener('click', () => startRun());
   $('cancelBtn').addEventListener('click', quit);
   $('sound').addEventListener('click', () => {
     S.muted = !S.muted; Snd.init(); Snd.mute(S.muted);
     $('waves').style.display = S.muted ? 'none' : ''; $('mute').style.display = S.muted ? '' : 'none';
   });
   $('pause').addEventListener('click', () => {
-    if (CAN_RUN_AGAIN.includes(S.state)) { runAgain(); return; } // back home: Start runs again
+    if (CAN_RUN_AGAIN.includes(S.state)) { startRun(); return; } // back home: Start runs again
     S.paused = !S.paused; Snd.init();
     $('pauseText').textContent = S.paused ? 'Resume' : 'Pause';
     $('pauseIcon').innerHTML = S.paused ? '&#9654;' : '&#10074;&#10074;';
@@ -884,10 +855,10 @@ function bindUI() {
   });
   $('stop').addEventListener('click', () => {
     Snd.init();
-    if (S.state === 'halted') { // Resume: pick up where it left off
+    if (S.state === 'halted') {
       setState(S.resumeState || 'cleaning'); S.resumeState = null; S.running = true;
       Snd.chirp(true);
-    } else if (!['done', 'boot'].includes(S.state)) { // Stop: halt right where it is
+    } else if (!['done', 'boot', 'confirm', 'stopped'].includes(S.state)) {
       S.paused = false; $('pauseText').textContent = 'Pause'; $('pauseIcon').innerHTML = '&#10074;&#10074;';
       S.resumeState = S.state === 'lifted' ? 'cleaning' : S.state;
       if (['align', 'reverse'].includes(S.resumeState)) S.resumeState = 'home';
@@ -897,102 +868,108 @@ function bindUI() {
   });
 
   // drag the panel by its title bar
-  const panel = $('panel'); let pd = null;
-  $('drag').addEventListener('pointerdown', (e) => { if (e.target.id === 'close') return; pd = { dx: e.clientX - panel.offsetLeft, dy: e.clientY - panel.offsetTop }; e.target.setPointerCapture(e.pointerId); });
-  $('drag').addEventListener('pointermove', (e) => { if (!pd) return; panel.style.left = clamp(e.clientX - pd.dx, 0, W - panel.offsetWidth) + 'px'; panel.style.top = clamp(e.clientY - pd.dy, 0, H - 40) + 'px'; panel.style.bottom = 'auto'; });
-  $('drag').addEventListener('pointerup', () => (pd = null));
+  const panel = $('panel');
+  $('drag').addEventListener('pointerdown', (e) => { if (e.target.id === 'close') return; panelDrag = { dx: e.clientX - panel.offsetLeft, dy: e.clientY - panel.offsetTop }; e.target.setPointerCapture(e.pointerId); });
+  $('drag').addEventListener('pointermove', (e) => { if (!panelDrag) return; panel.style.left = clamp(e.clientX - panelDrag.dx, 0, W - panel.offsetWidth) + 'px'; panel.style.top = clamp(e.clientY - panelDrag.dy, 0, H - 40) + 'px'; panel.style.bottom = 'auto'; panel.style.right = 'auto'; });
+  $('drag').addEventListener('pointerup', () => (panelDrag = null));
 
-  // robot & icons on the floor
+  // the robot and its dock can be picked up
   cv.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     Snd.init();
     const x = e.clientX, y = e.clientY, r = S.robot;
     const onRobot = Math.hypot(x - r.x, y - r.y) < R;
     if (hitDock(x, y) && (!onRobot || S.state === 'confirm')) {
-      // move the dock (the robot rides along if it's parked on it)
       S.drag = { kind: 'dock', dx: x - S.dock.x, dy: y - S.dock.y, carry: ON_DOCK.includes(S.state) };
-    } else if (onRobot && S.state !== 'confirm') {
+    } else if (onRobot && S.state !== 'confirm' && !S.busy) {
       S.drag = { kind: 'robot', dx: x - r.x, dy: y - r.y, prev: S.state };
-      if (S.strain) { S.strain.st = 'floor'; S.strain.x = S.strain.sx; S.strain.y = S.strain.sy; S.strain = null; }
+      if (S.strain) S.strain = null;
       setState('lifted'); S.target = null;
-    } else {
-      const it = hitItem(x, y);
-      if (it) {
-        it.st = 'held'; it.vx = it.vy = 0; it.revealed = true; selectItem(it);
-        S.drag = { kind: 'item', it, dx: x - it.x, dy: y - it.y, x0: x, y0: y, hist: [{ x, y, t: performance.now() }] };
-        if (S.target === it) S.target = null;
-      } else S.selected = null; // click on the empty desktop clears the selection
     }
     if (S.drag) cv.setPointerCapture(e.pointerId);
   });
   cv.addEventListener('pointermove', (e) => {
     const x = e.clientX, y = e.clientY, d = S.drag;
-    if (!d) {
-      const over = Math.hypot(x - S.robot.x, y - S.robot.y) < R || hitDock(x, y) || hitItem(x, y);
-      cv.style.cursor = over ? 'grab' : 'default';
-      return;
-    }
+    if (!d) { cv.style.cursor = (Math.hypot(x - S.robot.x, y - S.robot.y) < R || hitDock(x, y)) ? 'grab' : 'default'; return; }
     cv.style.cursor = 'grabbing';
     if (d.kind === 'dock') {
       S.dock.x = x - d.dx; S.dock.y = y - d.dy; clampDock();
       if (d.carry) { const p = dockedPos(); S.robot.x = p.x; S.robot.y = p.y; }
-    } else if (d.kind === 'robot') { S.robot.x = x - d.dx; S.robot.y = y - d.dy; }
-    else { d.it.x = clamp(x - d.dx, 24, W - 24); d.it.y = clamp(y - d.dy, 24, H - 40); d.hist.push({ x, y, t: performance.now() }); if (d.hist.length > 8) d.hist.shift(); }
+    } else { S.robot.x = x - d.dx; S.robot.y = y - d.dy; }
   });
-  const release = () => {
+  const release = (e) => {
     const d = S.drag; if (!d) return; S.drag = null; cv.style.cursor = 'default';
+    if (e) setInteractive(overUs(e.clientX, e.clientY));
     if (d.kind === 'dock') {
       const pos = { x: S.dock.x, y: S.dock.y };
-      if (PREVIEW) { try { localStorage.setItem('crumby.dock', JSON.stringify(pos)); } catch (e) {} }
+      if (PREVIEW) { try { localStorage.setItem('crumby.dock', JSON.stringify(pos)); } catch (er) {} }
       else window.crumby.saveDock(pos);
       Snd.thud();
       return;
     }
-    if (d.kind === 'robot') {
-      Snd.thud();
-      const left = S.items.some((i) => i.st === 'floor' || i.st === 'held');
-      if (d.prev === 'halted') setState('halted');
-      else if (S.homeReason === 'stop' || ['done', 'stopped'].includes(d.prev)) goHome(S.homeReason === 'stop' || d.prev === 'stopped' ? 'stop' : 'done');
-      else if (!S.mapped) { S.beamStart = S.robot.a; S.beamA = S.beamStart; S.beamSwept = 0; S.items.forEach((i) => (i.revealed = false)); S.running = true; setState('mapping'); }
-      else if (!left) goHome('done');
-      else if (binPct() >= 100) goHome('bin');
-      else if (S.battery < 15) goHome('battery');
-      else { S.homeReason = null; S.running = true; setState('cleaning'); }
-    } else {
-      const it = d.it, h = d.hist, now = performance.now();
-      const old = h.find((p) => now - p.t < 90) || h[0], lastP = h[h.length - 1];
-      const dtm = Math.max(16, lastP.t - old.t) / 1000;
-      it.vx = clamp((lastP.x - old.x) / dtm, -2600, 2600); it.vy = clamp((lastP.y - old.y) / dtm, -2600, 2600);
-      if (now - lastP.t > 120) it.vx = it.vy = 0;
-      const moved = Math.hypot(lastP.x - d.x0, lastP.y - d.y0);
-      if (moved < 4) it.vx = it.vy = 0; // just a click: select it, don't throw it
-      it.st = 'floor'; it.thrown = Math.hypot(it.vx, it.vy) > 180;
-      selectItem(it);
-      if (it.fixed) { /* system icons just slide around */ }
-      else if (['done', 'stopped'].includes(S.state) && S.homeReason !== 'stop') { S.homeReason = null; S.running = true; setState('undock'); }
-    }
+    Snd.thud();
+    if (d.prev === 'halted') setState('halted');
+    else if (['done', 'stopped', 'confirm'].includes(d.prev)) goHome(d.prev === 'stopped' ? 'stop' : 'done');
+    else if (!S.mapped) { S.beamStart = S.robot.a; S.beamA = S.beamStart; S.beamSwept = 0; S.items.forEach((i) => (i.revealed = false)); S.running = true; setState('mapping'); }
+    else if (!S.items.some(candidate)) goHome('done');
+    else if (binPct() >= 100) goHome('bin');
+    else if (S.battery < 15) goHome('battery');
+    else { S.homeReason = null; S.running = true; setState('cleaning'); }
   };
   cv.addEventListener('pointerup', release);
-
-  // double-click opens the file, right-click shows its menu — like the real desktop
-  cv.addEventListener('dblclick', (e) => {
-    const it = hitItem(e.clientX, e.clientY);
-    if (!it) return;
-    selectItem(it);
-    if (!PREVIEW && it.canTrash) window.crumby.open(it.id);
-  });
-  cv.addEventListener('contextmenu', async (e) => {
-    e.preventDefault();
-    const it = hitItem(e.clientX, e.clientY);
-    if (!it) return;
-    selectItem(it);
-    if (PREVIEW) return;
-    const choice = await window.crumby.itemMenu(it.id, it.fixed && it.canTrash);
-    if (choice === 'protect') setProtected(it, true);
-    else if (choice === 'unprotect') setProtected(it, false);
-    selectItem(it);
-  });
   cv.addEventListener('pointercancel', release);
+}
+let panelDrag = null;
+
+// ---------- setup ----------
+function mockItems() {
+  // preview data: a messy desktop with 42 things
+  const names = ['notes copy 2.txt', 'Screenshot 2026-10-19 at 14.07.08.png', 'invoice-sample.pdf', 'budget-snacks.xlsx', 'New Folder', 'q3-slides-actually-final.pptx',
+    'wallpaper-idea.png', 'demo-for-nobody.mp4', 'logo-new-NEW.png', 'final-final-v2.pdf', 'voice-memo-idea.m4a', 'old-site.zip', 'IMG_2042.png', 'desktop-cleaning',
+    'untitled folder', 'backup.zip', 'todo.txt', 'resume (3).docx', 'Screenshot 2026-10-21.png', 'cat.gif', 'stuff', 'video-export.mov', 'readme.md', 'tax-2025.pdf',
+    'design-v7.fig', 'Untitled.txt', 'photo.jpg', 'archive', 'meeting-notes.txt', 'Recording 01.mp4', 'icons', 'export (1).csv', 'draft.docx', 'IMG_1999.jpg',
+    'temp', 'presentation.key', 'node-installer.msi', 'hello.py', 'Screenshot (88).png', 'random.json', 'mockup.png', 'Recycle Bin'];
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  return names.map((name, i) => {
+    const kind = name === 'Recycle Bin' ? 'system' : /\.(png|jpg|gif)$/.test(name) ? 'image' : /\./.test(name) ? 'file' : 'folder';
+    const cluster = i < 26;
+    const x = cluster ? W * 0.32 + rnd() * W * 0.3 : (i % 2 ? W - 60 - rnd() * 40 : 50 + rnd() * W * 0.18);
+    const y = cluster ? H * 0.2 + rnd() * H * 0.38 : 60 + rnd() * (H - 200);
+    const big = /mp4|mov|zip|msi/.test(name);
+    return { name, x, y, iconSize: 48, kind, icon: null, size: Math.round((big ? 600e6 + rnd() * 2.4e9 : rnd() * 9e7)) };
+  });
+}
+
+// (re)load the desktop icons onto the floor
+
+async function setup() {
+  if (PREVIEW) document.body.classList.add('preview');
+  resize();
+  const data = PREVIEW ? {} : await window.crumby.init();
+  S.testMode = !!data.testMode;
+
+  const [rImg, dImg] = await Promise.all([loadImg('assets/robot.svg'), loadImg('assets/dock.svg')]);
+  robotSprite = raster(rImg, R * 2, R * 2);
+  dockSprite = raster(dImg, DOCK_W, DOCK_H);
+
+  S.dock.x = Math.round(W - 282 - 26 - 60 - DOCK_W); // left of the panel, away from the icon columns
+  S.dock.y = Math.round(H - DOCK_H - 4);
+  let saved = data.dock;
+  if (!saved && PREVIEW) { try { saved = JSON.parse(localStorage.getItem('crumby.dock') || 'null'); } catch (e) {} }
+  if (saved) { S.dock.x = saved.x; S.dock.y = saved.y; }
+  clampDock();
+  const dp = dockedPos(); S.robot.x = dp.x; S.robot.y = dp.y;
+
+  bindUI();
+  if (PREVIEW) {
+    onScan({ items: mockItems().map((m) => ({ ...m, canTrash: m.kind !== 'system', box: [-36, -26, 36, 46] })), mouseDown: false });
+  } else {
+    window.crumby.onScan(onScan);
+    window.crumby.ready();
+  }
+  refreshConfirm();
+  last = performance.now();
+  requestAnimationFrame(frame);
 }
 
 // ---------- loop ----------

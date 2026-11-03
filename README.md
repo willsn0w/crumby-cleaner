@@ -3,15 +3,25 @@
 # Crumby
 
 > [!NOTE]
-> **Versão 1.4 — já está bastante funcional.** O Crumby limpa a área de trabalho de verdade (tudo vai para a Lixeira do Windows), aparece no clique direito da área de trabalho e fica rodando na bandeja do sistema. Ainda pode ter arestas no Windows: se algo sumir, confira a Lixeira.
+> **Versão 1.5 — já está bastante funcional, e testada num Windows 11 de verdade.** O Crumby agora vive na sua área de trabalho como um bichinho de estimação (no estilo Desktop Goose e Shimeji): a área de trabalho do Windows continua funcionando normalmente por baixo dele, e tudo o que ele engole vai para a Lixeira.
 
-Um robô aspirador que limpa a sua área de trabalho do Windows de verdade. Ele sai da base, mapeia a tela com um laser, recolhe os ícones um por um e **cada ícone que ele engole vai para a Lixeira do Windows**. Volta para a base quando o compartimento enche, se esvazia e termina com tudo limpo.
+Um robô aspirador que limpa a sua área de trabalho do Windows de verdade. Ele sai da base, mapeia a tela com um laser, vai até os ícones um por um e **cada ícone que ele engole vai para a Lixeira do Windows**. Volta para a base quando o compartimento enche, se esvazia e termina com tudo limpo.
 
-**Nada é apagado de vez:** tudo vai para a Lixeira e pode ser restaurado de lá. Antes de começar, o painel mostra quantos itens serão movidos e só começa quando você clica em **Start cleaning**. Atalhos do sistema (Lixeira, Este Computador) ficam onde estão, e arquivos que o Windows não deixa mover (em uso, sem permissão) são "cuspidos" de volta e ficam na área de trabalho.
+**Nada é apagado de vez:** tudo vai para a Lixeira e pode ser restaurado de lá. Antes de começar, o painel mostra quantos itens serão movidos e só começa quando você clica em **Start cleaning**. Atalhos do sistema (Lixeira, Este Computador) e o próprio Crumby ficam onde estão, e arquivos que o Windows não deixa mover (em uso, sem permissão) são "cuspidos" de volta.
+
+## Como funciona (modelo "mascote")
+
+O Crumby não imita a área de trabalho: ele é uma janela transparente por cima dela que **deixa o mouse passar em todo lugar**, menos no robô, na base e no painel.
+
+- **A área de trabalho é a de sempre:** você seleciona, abre, renomeia, usa o clique direito e arrasta arquivos de outras janelas para a área de trabalho normalmente, com o Crumby aberto.
+- **O robô enxerga os ícones reais:** ele lê a posição de cada ícone várias vezes por segundo. Arquivo novo ou ícone arrastado, ele percebe na hora.
+- **Gravidade de verdade:** os ícones reais perto do robô são puxados e tremem. Nada se mexe enquanto você está arrastando algo, e ícones selecionados são deixados em paz.
+- **A sucção:** quando o robô engole um ícone, ele fotografa só aquele ícone, recorta usando uma foto do papel de parede tirada no começo e anima o recorte entrando no robô (cerca de 1 segundo por item). Enquanto a Lixeira trabalha, um pedaço do papel de parede cobre o ícone real até o Windows tirá-lo.
+- **Aparece em prints e gravações de tela:** o Crumby só some das capturas nos milissegundos em que fotografa um ícone.
 
 ## Download
 
-Baixe o `Crumby.exe` na página de [Releases](../../releases) (Windows 10/11, 64 bits). Na primeira execução ele leva alguns segundos para se instalar em `%LOCALAPPDATA%\Crumby`; depois abre na hora.
+Baixe o `Crumby.exe` na página de [Releases](../../releases) ou em **Actions → Build Crumby.exe** (Windows 10/11, 64 bits). Na primeira execução ele leva alguns segundos para se instalar em `%LOCALAPPDATA%\Crumby`; depois abre na hora.
 
 Como o executável não é assinado, o Windows pode mostrar o aviso do SmartScreen: clique em **Mais informações → Executar assim mesmo**.
 
@@ -23,32 +33,35 @@ O registro é só para o seu usuário (não precisa de administrador). Para remo
 
 ## Bandeja do sistema
 
-Quando você fecha a janela de limpeza (Esc, Cancel ou a bolinha vermelha), o Crumby continua rodando em plano de fundo, com o ícone dele na bandeja do sistema (perto do relógio; pode estar escondido na setinha **^**).
+Quando você fecha o Crumby (Esc, Cancel ou a bolinha vermelha), ele continua rodando em plano de fundo, com o ícone dele na bandeja do sistema (perto do relógio; pode estar escondido na setinha **^**).
 
-- **Clique no ícone:** abre uma nova limpeza.
-- **Clique direito no ícone:** *Limpar com o Crumby*, *Iniciar com o Windows* (ligado por padrão; ele inicia só na bandeja, sem abrir a limpeza) e *Sair do Crumby*.
+- **Clique no ícone:** mostra o Crumby de novo.
+- **Clique direito no ícone:** *Limpar com o Crumby*, *Iniciar com o Windows* (ligado por padrão; ele inicia só na bandeja) e *Sair do Crumby*.
 
 ## O que ele faz
 
-- **Mapeamento:** feixe de laser varre a tela com som de escaneamento; cada arquivo encontrado dá um "ping" e aparece no minimapa.
-- **Limpeza:** o robô vai até cada ícone e o "suga" com um som de aspiração forte; o motor ruge mais alto quando há ícones por perto. O caminho fica desenhado no minimapa.
-- **Gravidade:** os ícones perto do robô se esticam, se torcem e tremem na direção dele, são puxados e giram em volta. Alguns ficam inclinados ou de cabeça para baixo e mudam de lugar.
+- **Mapeamento:** feixe de laser varre a tela com som de escaneamento; cada ícone encontrado brilha, dá um "ping" e aparece no minimapa.
+- **Limpeza:** o robô vai até cada ícone e o suga com som de aspiração forte; o motor ruge mais alto quando há ícones por perto. O caminho fica desenhado no minimapa.
 - **Arquivo grande:** para, treme e mostra *Big file. Straining…*
 - **Bin cheio:** volta, entra de ré na base e se esvazia (*Self-emptying*), depois retoma.
 - **Bateria:** descarrega andando e recarrega na base.
-- **Ícones idênticos aos do Windows:** ao começar, o Crumby fotografa a área de trabalho com e sem os ícones e usa o recorte exato de cada um (imagem, tamanho, miniatura, setinha de atalho e nome). Para a foto sair limpa, ele minimiza as janelas abertas ao começar e as restaura ao fechar.
-- **A área de trabalho real continua viva:** durante a limpeza, o Crumby cobre a tela com a foto do papel de parede, e os ícones reais do Windows continuam no lugar por baixo (só somem por uma fração de segundo no começo, para a foto). Assim o Windows não perde as posições dos ícones.
-- **Arraste arquivos para a área de trabalho com o Crumby aberto:** o Crumby deixa o arrasto passar para o Windows, que recebe o arquivo no lugar exato onde você soltou, e o ícone novo aparece ali na hora.
-- **Use os ícones durante a limpeza:** clique para selecionar, duplo clique para abrir, clique direito para *Abrir*, *Mostrar na pasta* ou *Não limpar este item*, e arraste para mudar de lugar. Ao fechar, os ícones reais ficam onde você os deixou. O robô não pega um item que você está segurando ou acabou de selecionar.
-- **Interação:** arraste o robô com o mouse, ou arremesse um ícone nele (*Ouch.*).
-- **Lixeira de verdade:** cada ícone engolido vai para a Lixeira do Windows na hora; se o Windows recusar, o robô cospe o arquivo de volta (*Can't recycle…*).
-- **Confirmação:** antes de começar, o painel mostra quantos itens e quantos GB irão para a Lixeira, com **Start cleaning** e **Cancel**.
-- **Base arrastável:** arraste a base para qualquer lugar da tela (ela nunca entra embaixo da barra de tarefas). Se o robô estiver estacionado, vai junto; o Crumby lembra a posição na próxima vez.
-- **Plano de fundo:** depois de fechado, fica na bandeja do sistema, pronto para a próxima limpeza.
-- **Painel:** status, minimapa, Battery, Bin, itens, GB coletados, tempo, Pause e Stop. O Stop para o robô onde ele está e vira **Resume** para voltar a aspirar. Quando o robô volta para a base no fim, o Pause vira **Start**: ele procura de novo os arquivos da área de trabalho e sai para mais uma rodada.
+- **Confirmação:** antes de começar, o painel mostra quantos itens e quantos MB/GB irão para a Lixeira, com **Start cleaning** e **Cancel**.
+- **Base e robô arrastáveis:** arraste a base para qualquer lugar (nunca embaixo da barra de tarefas; a posição é lembrada) e pegue o robô no colo.
+- **Painel:** status, minimapa, Battery, Bin, itens, tamanho coletado, tempo, Pause e Stop. O Stop para o robô onde ele está e vira **Resume**. Quando o robô volta para a base no fim, o Pause vira **Start** para mais uma rodada.
 - **Sons** sintetizados (escaneamento, motor, sucção, bipes, esvaziamento), com botão de mudo.
 
 ## Versões
+
+### 1.5
+- **Novo modelo "mascote":** a área de trabalho real fica sempre na frente e funcionando; o Crumby desenha só o robô, a base e o painel e deixa o mouse passar no resto. Dá para arrastar arquivos para a área de trabalho, selecionar, abrir e renomear com o Crumby aberto.
+- **Corrigido um erro antigo que quebrava tudo no Windows:** o ajudante que lê os ícones não compilava desde a 1.3.2 (o PowerShell recusava uma linha), então o Crumby não enxergava os ícones de verdade. Era a causa de boa parte dos bugs das versões 1.3.2 e 1.4.
+- **Corrigido:** janela cinza em vez de transparente em alguns Windows.
+- A gravidade agora move os ícones reais; a sucção fotografa só o ícone engolido e leva cerca de 1 segundo por item.
+- O Crumby pede ao Windows para atualizar a área de trabalho (F5) no começo e no fim, para não sobrar ícone de arquivo que já foi para a Lixeira.
+- O Crumby não tenta mais se jogar na Lixeira, e aparece normalmente em prints e gravações de tela.
+- O painel foi para o canto inferior direito, fora da coluna de ícones do Windows.
+- Saíram: as janelas minimizadas no começo, o menu próprio dos ícones (agora vale o do Windows), e a distorção forte de todos os ícones em volta do robô (agora só o ícone engolido se contorce).
+- Testado num Windows 11 em espanhol, com área de trabalho no OneDrive e tela com escala de 125%.
 
 ### 1.4
 - Corrigido: não dava para arrastar arquivos novos para a área de trabalho com o Crumby aberto. Agora o Windows recebe o arquivo onde você soltou e o Crumby mostra o ícone novo no mesmo lugar.
@@ -90,17 +103,18 @@ Quando você fecha a janela de limpeza (Esc, Cancel ou a bolinha vermelha), o Cr
 
 | Caminho | O que é |
 |---|---|
-| `main.js` | Processo principal do Electron: lê os arquivos do Desktop, pega ícones e posições, abre a camada transparente, move itens para a Lixeira e registra o menu do clique direito |
-| `desktop-helper.ps1` | Ajudante do Windows (PowerShell + C#): lê as posições dos ícones e esconde/mostra a camada de ícones |
-| `renderer/` | Piso, robô, base, física, máquina de estados, painel e sons |
+| `main.js` | Processo principal: lê os ícones reais, move os ícones (gravidade), fotografa e recorta o ícone engolido, Lixeira, menu do clique direito e bandeja |
+| `desktop-helper.ps1` | Ajudante do Windows (PowerShell + C#): posições e seleção dos ícones, mover ícones, fotografar um pedaço da tela, F5 |
+| `renderer/` | Robô, base, laser, física, máquina de estados, painel e sons |
 | `renderer/assets/` | Imagens do robô e da base (SVG + PNG) |
 | `launcher/` | Lançador em Go que embute o app num único `Crumby.exe` |
+| `desktop-shortcut/` | `Crumby.exe` pequeno (2 MB) que abre o Crumby já instalado |
 | `scripts/build-win.sh` | Gera `dist/Crumby.exe` |
 
 ## Rodar e compilar
 
 ```bash
-# visualizar a simulação sem instalar nada (dados de exemplo)
+# visualizar a simulação sem instalar nada (ícones de exemplo)
 open renderer/index.html
 
 # rodar com Electron
@@ -111,8 +125,11 @@ npm start
 npm run build:win
 ```
 
+**Modo de teste:** crie um arquivo `test-mode` com o texto `on` ao lado do `main.js` instalado (`%LOCALAPPDATA%\Crumby\<versão>\resources\app`). Nesse modo o Crumby só limpa arquivos chamados `crumby-test…`, grava um `debug.log` e se reinicia sozinho quando os arquivos dele mudam.
+
 ## Limitações
 
-- Funciona no monitor principal. Ícones em outros monitores não são limpos: somem durante a limpeza e voltam no Esc.
+- Funciona no monitor principal; ícones em outros monitores são ignorados.
+- Com **Organizar ícones automaticamente** ligado no Windows, a gravidade não consegue mover os ícones (o Windows os devolve para a grade).
 - Itens da área de trabalho pública (`C:\Users\Public\Desktop`) precisam de permissão de administrador para ir para a Lixeira; sem ela, o robô os cospe de volta.
-- Se a leitura das posições dos ícones falhar, ele os arruma na grade padrão do Windows.
+- Se você trocar o papel de parede no meio de uma limpeza, os recortes podem sair com um contorno do papel antigo até a próxima rodada.

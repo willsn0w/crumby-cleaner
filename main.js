@@ -1,29 +1,40 @@
-// Crumby — a desktop-cleaning robot that lives on your wallpaper.
-// Main process: finds desktop icons, hides the real ones, opens a transparent
-// overlay where the robot collects them. Every icon the robot swallows is moved
-// to the Windows Recycle Bin (shell.trashItem), so it can always be restored.
-// Adds "Limpar com o Crumby" to the desktop right-click menu and keeps running
-// in the system tray after the cleaning window is closed.
+// Crumby — a robot vacuum that lives on your Windows desktop, like a desktop pet.
+//
+// The real desktop always stays in charge: Crumby's window is transparent and lets every click,
+// drag and drop through, except over the robot, its dock and its panel. The robot reads where the
+// real icons are several times a second, nudges them for real with its "gravity", and when it
+// swallows one it photographs just that icon, sends the file to the Recycle Bin and animates the
+// photo into the robot. Adds "Limpar com o Crumby" to the desktop right-click menu and keeps
+// running in the system tray.
 
-const { app, BrowserWindow, ipcMain, screen, nativeImage, globalShortcut, shell, dialog, Tray, Menu, desktopCapturer } = require('electron');
-const { execFile } = require('child_process');
+const { app, BrowserWindow, ipcMain, screen, nativeImage, shell, dialog, Tray, Menu, desktopCapturer } = require('electron');
+const { execFile, spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { spawn } = require('child_process');
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 if (process.platform === 'win32') app.setAppUserModelId('app.crumby.desktop');
 if (!app.requestSingleInstanceLock()) app.exit(0);
 
+// test mode (a file named "test-mode" containing "on", next to main.js): only files named
+// crumby-test* are cleaned, a debug.log is written and Crumby restarts when its files change
+const TEST_MODE = (() => { try { return /^\s*on/i.test(fs.readFileSync(path.join(__dirname, 'test-mode'), 'utf8')); } catch (e) { return false; } })();
+
 let win = null;
-let helper = null;
-let helperBuf = '';
-let helperWaiters = [];
+
+// test mode keeps a diagnostic log next to main.js
+function log(...a) {
+  if (!TEST_MODE) return;
+  try { fs.appendFileSync(path.join(__dirname, 'debug.log'), new Date().toISOString().slice(11, 23) + ' ' + a.map((x) => typeof x === 'string' ? x : JSON.stringify(x)).join(' ') + '\n'); } catch (e) {}
+}
+process.on('uncaughtException', (e) => log('UNCAUGHT', String(e && e.stack || e)));
+process.on('unhandledRejection', (e) => log('UNHANDLED', String(e && e.stack || e)));
 
 // ---------- desktop helper (Windows only) ----------
+let helper = null, helperBuf = '', helperWaiters = [], helperQueue = Promise.resolve();
 function startHelper() {
-  if (process.platform !== 'win32') return;
+  if (process.platform !== 'win32' || helper) return;
   try {
     const src = fs.readFileSync(path.join(__dirname, 'desktop-helper.ps1'), 'utf8');
     const file = path.join(os.tmpdir(), 'crumby-desktop-helper.ps1');
@@ -42,30 +53,35 @@ function startHelper() {
         if (w) w(out);
       }
     });
+    helper.stderr.setEncoding('utf8');
+    helper.stderr.on('data', (d) => log('helper stderr', d.slice(0, 800)));
+    helper.on('exit', (code) => { log('helper exit', code); });
     helper.on('exit', () => { helper = null; helperWaiters.splice(0).forEach((w) => w('')); });
     helper.on('error', () => { helper = null; });
   } catch (e) { helper = null; }
 }
-
+// one command at a time, in order
 function helperCmd(cmd, timeout = 15000) {
-  return new Promise((resolve) => {
+  const run = () => new Promise((resolve) => {
     if (!helper) return resolve('');
     const t = setTimeout(() => resolve(''), timeout);
     helperWaiters.push((out) => { clearTimeout(t); resolve(out); });
     try { helper.stdin.write(cmd + '\n'); } catch (e) { clearTimeout(t); resolve(''); }
   });
+  const p = helperQueue.then(run, run);
+  helperQueue = p.catch(() => {});
+  return p;
 }
 
-// ---------- desktop files ----------
+// ---------- desktop files (cached) ----------
 const IMG = /\.(png|jpe?g|gif|bmp|webp|heic|tiff?)$/i;
-
 function desktopDirs() {
   const dirs = [app.getPath('desktop')];
   const pub = process.env.PUBLIC ? path.join(process.env.PUBLIC, 'Desktop') : null;
   if (pub && fs.existsSync(pub)) dirs.push(pub);
   return dirs;
 }
-
+const folderSizes = new Map();
 async function dirSize(p, budget) {
   let total = 0;
   const stack = [p];
@@ -82,8 +98,9 @@ async function dirSize(p, budget) {
   }
   return total;
 }
-
-async function listDesktopFiles() {
+let fileCache = { at: 0, files: [] };
+async function desktopFiles() {
+  if (Date.now() - fileCache.at < 1500) return fileCache.files;
   const files = [];
   for (const dir of desktopDirs()) {
     let entries = [];
@@ -92,53 +109,145 @@ async function listDesktopFiles() {
       const n = e.name;
       if (/^desktop\.ini$/i.test(n) || n.startsWith('~$') || n.startsWith('.')) continue;
       const fp = path.join(dir, n);
-      let size = 0, isDir = e.isDirectory();
-      try {
-        if (isDir) size = await dirSize(fp, { n: 4000 });
-        else size = (await fs.promises.stat(fp)).size;
-      } catch (er) {}
+      const isDir = e.isDirectory();
+      let size = 0;
+      if (isDir) {
+        if (!folderSizes.has(fp)) { folderSizes.set(fp, 0); dirSize(fp, { n: 4000 }).then((s) => folderSizes.set(fp, s)); }
+        size = folderSizes.get(fp);
+      } else { try { size = (await fs.promises.stat(fp)).size; } catch (er) {} }
       files.push({ name: n, path: fp, size, isDir });
     }
   }
+  fileCache = { at: Date.now(), files };
   return files;
 }
-
-async function iconFor(f) {
-  try {
-    if (!f.isDir && IMG.test(f.name) && nativeImage.createThumbnailFromPath) {
-      const t = await nativeImage.createThumbnailFromPath(f.path, { width: 96, height: 96 });
-      if (t && !t.isEmpty()) return t.toDataURL();
-    }
-  } catch (e) {}
-  try {
-    const ic = await app.getFileIcon(f.path, { size: 'large' });
-    if (ic && !ic.isEmpty()) return ic.toDataURL();
-  } catch (e) {}
-  return null;
-}
-
 function kindOf(f) {
   if (!f) return 'system';
   if (f.isDir) return 'folder';
   if (IMG.test(f.name)) return 'image';
   return 'file';
 }
+// listview labels may hide extensions (.lnk/.url never show them)
+function matchFile(label, files) {
+  const lo = label.toLowerCase();
+  return files.find((f) => f.name.toLowerCase() === lo)
+    || files.find((f) => f.name.replace(/\.[^.]+$/, '').toLowerCase() === lo) || null;
+}
 
-// ---------- exact icon copies ----------
-// Photograph the desktop with the icons (A) and without them (B). Wherever A differs from B
-// is the icon + its label exactly as Windows drew it; the difference gives the transparency.
+// ---------- the real icons ----------
+let rows = new Map();   // name -> latest row from Explorer (physical px, listview coords)
+let virt = { x: 0, y: 0 }, mouseDown = false;
+
+function parseScan(text) {
+  const out = new Map();
+  for (const line of text.split(/\r?\n/)) {
+    const p = line.split('\t');
+    if (p[0] === 'VS') virt = { x: +p[1] || 0, y: +p[2] || 0 };
+    else if (p[0] === 'MB') mouseDown = p[1] === '1';
+    else if (p[0] === 'IT' && p.length >= 14) {
+      const name = p.slice(13).join('\t');
+      out.set(name, { idx: +p[1], pos: [+p[2], +p[3]], icon: p.slice(4, 8).map(Number), bounds: p.slice(8, 12).map(Number), sel: p[12] === '1', name });
+    }
+  }
+  return out;
+}
+
+// physical listview coords <-> DIP inside our window
+function geo() {
+  const d = screen.getPrimaryDisplay();
+  return { s: d.scaleFactor, wa: d.workArea, ox: virt.x - d.bounds.x * d.scaleFactor, oy: virt.y - d.bounds.y * d.scaleFactor };
+}
+function toDip(g, px, py) { return [(px + g.ox) / g.s - g.wa.x, (py + g.oy) / g.s - g.wa.y]; }
+
+let scanLogged = 0;
+async function scanDesktop() {
+  const text = await helperCmd('scan', 4000);
+  if (scanLogged < 3) { scanLogged++; log('scan', text.slice(0, 600)); }
+  if (!text) return null;
+  rows = parseScan(text);
+  const files = await desktopFiles();
+  const g = geo();
+  const items = [];
+  for (const r of rows.values()) {
+    const [x, y] = toDip(g, (r.icon[0] + r.icon[2]) / 2, (r.icon[1] + r.icon[3]) / 2);
+    if (x < -20 || y < -20 || x > g.wa.width + 20 || y > g.wa.height + 20) continue; // other monitors
+    const f = matchFile(r.name, files);
+    const [bl, bt] = toDip(g, r.bounds[0], r.bounds[1]);
+    const [br, bb] = toDip(g, r.bounds[2], r.bounds[3]);
+    items.push({
+      name: r.name, x, y, sel: r.sel, box: [bl - x, bt - y, br - x, bb - y],
+      kind: kindOf(f), size: f ? f.size : 0,
+      canTrash: !!f && !/^crumby(\.exe|\.lnk)?$/i.test(f.name) && (!TEST_MODE || /^crumby-test/i.test(r.name)), // never itself
+    });
+  }
+  return { items, mouseDown };
+}
+
+let scanning = false;
+async function scanLoop() {
+  while (win && session) {
+    if (!scanning) {
+      scanning = true;
+      try {
+        const res = await scanDesktop();
+        if (res && win) win.webContents.send('crumby:scan', res);
+      } catch (e) {}
+      scanning = false;
+    }
+    await new Promise((r) => setTimeout(r, 220));
+  }
+}
+
+// gravity: the renderer asks to put icons at new DIP centers
+async function moveIcons(list) {
+  if (!Array.isArray(list) || !list.length) return;
+  const g = geo();
+  const parts = ['moves'];
+  for (const m of list) {
+    const r = rows.get(m.name);
+    if (!r) continue;
+    const cx = (r.icon[0] + r.icon[2]) / 2, cy = (r.icon[1] + r.icon[3]) / 2;
+    const nx = (m.x + g.wa.x) * g.s - g.ox, ny = (m.y + g.wa.y) * g.s - g.oy; // wanted icon center, listview coords
+    const dx = Math.round(nx - cx), dy = Math.round(ny - cy);
+    if (!dx && !dy) continue;
+    const px = Math.max(0, r.pos[0] + dx), py = Math.max(0, r.pos[1] + dy);
+    parts.push(r.idx, px, py, r.name);
+    // optimistic update until the next scan
+    const ddx = px - r.pos[0], ddy = py - r.pos[1];
+    r.pos = [px, py];
+    r.icon = [r.icon[0] + ddx, r.icon[1] + ddy, r.icon[2] + ddx, r.icon[3] + ddy];
+    r.bounds = [r.bounds[0] + ddx, r.bounds[1] + ddy, r.bounds[2] + ddx, r.bounds[3] + ddy];
+  }
+  if (parts.length > 1) await helperCmd(parts.join('\t'), 3000);
+}
+
+// ---------- photos ----------
 async function grabScreen(display) {
   try {
     const want = { width: Math.round(display.bounds.width * display.scaleFactor), height: Math.round(display.bounds.height * display.scaleFactor) };
     const srcs = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: want });
-    const src = srcs.find((s) => s.display_id === String(display.id)) || srcs[0];
+    const src = srcs.find((x) => x.display_id === String(display.id)) || srcs[0];
     if (!src || src.thumbnail.isEmpty()) return null;
     const sz = src.thumbnail.getSize();
     return { buf: src.thumbnail.toBitmap(), w: sz.width, h: sz.height, k: sz.width / want.width };
-  } catch (e) { return null; }
+  } catch (e) { log('grabScreen', String(e)); return null; }
 }
 
-// A, B: BGRA screen bitmaps of equal size. rect / icon: [l, t, r, b] in that bitmap's pixels.
+// the robot hides from screen capture only for these few milliseconds, so screenshots and
+// screen recordings of Crumby work normally the rest of the time
+async function grab(rect) {
+  const [l, t, r, b] = rect.map(Math.round);
+  if (win) { try { win.setContentProtection(true); } catch (e) {} await new Promise((res) => setTimeout(res, 70)); }
+  const out = await helperCmd(`grab\t${l}\t${t}\t${r - l}\t${b - t}`, 4000);
+  if (win) { try { win.setContentProtection(false); } catch (e) {} }
+  const line = out.split(/\r?\n/).find((x) => x.startsWith('PNG\t'));
+  if (!line) return null;
+  const img = nativeImage.createFromBuffer(Buffer.from(line.slice(4), 'base64'));
+  if (img.isEmpty()) return null;
+  const sz = img.getSize();
+  return { buf: img.toBitmap(), w: sz.width, h: sz.height, k: 1, img };
+}
+
 function cutSprite(A, B, rect, icon) {
   const W = A.w;
   const l = Math.max(0, Math.floor(rect[0])), t = Math.max(0, Math.floor(rect[1]));
@@ -180,190 +289,74 @@ function cutSprite(A, B, rect, icon) {
   return { url: img.toDataURL(), l, t, w, h };
 }
 
-// item bookkeeping for moving the real icons afterwards
-let itemMeta = [];
-
-// the wallpaper without icons (B) is kept for the whole session: it is the overlay's background,
-// so the real icons can stay alive underneath (Windows keeps track of positions and drops normally)
-let wallpaperShot = null;
-
-function looksBlack(A) {
-  let black = 0, n = 0;
-  for (let k = 0; k < 400; k++) {
-    const x = Math.floor(Math.random() * A.w), y = Math.floor(Math.random() * A.h), i = (y * A.w + x) * 4;
-    n++; if (A.buf[i] === 0 && A.buf[i + 1] === 0 && A.buf[i + 2] === 0) black++;
-  }
-  return black / n > 0.9;
+// one photo of the bare wallpaper per run: icons blink away for a split second (while the lidar
+// sweeps), Crumby's window is kept out of the photo
+let wallpaper = null;
+async function takeWallpaper() {
+  const d = screen.getPrimaryDisplay();
+  if (win) { try { win.setContentProtection(true); } catch (e) {} }
+  await helperCmd('hide', 3000);
+  await new Promise((r) => setTimeout(r, 160));
+  const shot = await grabScreen(d);
+  await helperCmd('show', 3000);
+  if (win) { try { win.setContentProtection(false); } catch (e) {} }
+  if (shot) wallpaper = shot;
+  log('wallpaper', shot ? `${shot.w}x${shot.h} k=${shot.k}` : 'failed');
+  return !!shot;
+}
+function wallpaperCrop(rect) {
+  const B = wallpaper;
+  if (!B) return null;
+  const k = B.k;
+  const l = Math.round(rect[0] * k), t = Math.round(rect[1] * k), w = Math.round((rect[2] - rect[0]) * k), h = Math.round((rect[3] - rect[1]) * k);
+  if (l < 0 || t < 0 || l + w > B.w || t + h > B.h || w <= 0 || h <= 0) return null;
+  const buf = Buffer.alloc(w * h * 4);
+  for (let y = 0; y < h; y++) B.buf.copy(buf, y * w * 4, ((t + y) * B.w + l) * 4, ((t + y) * B.w + l + w) * 4);
+  return { buf, w, h, k: 1 };
 }
 
-// screenshot with the icons, never including our own window
-async function grabWithIcons(display) {
-  let A = await grabScreen(display);
-  if (A && win && win.isVisible() && looksBlack(A)) { // capture-exclusion not supported on this Windows
-    win.hide(); await new Promise((r) => setTimeout(r, 220));
-    A = await grabScreen(display);
-    if (win) win.show();
+// Swallow, step 1 (fast): photo of the icon, cut out against the wallpaper photo. The renderer starts
+// the animation at once and covers the real icon with the matching piece of wallpaper.
+async function liftIcon(name) {
+  const r = rows.get(name);
+  if (!r) return null;
+  if (!wallpaper) await takeWallpaper();
+  const g = geo();
+  const pad = Math.round(4 * g.s);
+  const rect = [r.bounds[0] + g.ox - pad, r.bounds[1] + g.oy - pad, r.bounds[2] + g.ox + pad, r.bounds[3] + g.oy + pad];
+  const icon = [r.icon[0] + g.ox, r.icon[1] + g.oy, r.icon[2] + g.ox, r.icon[3] + g.oy];
+  const A = await grab(rect);
+  if (!A) return null;
+  let B = wallpaperCrop(rect);
+  if (B && (B.w !== A.w || B.h !== A.h)) B = null;
+  const s = g.s;
+  const icx = (icon[0] + icon[2]) / 2 - rect[0], icy = (icon[1] + icon[3]) / 2 - rect[1];
+  let sprite = null, patch = null;
+  if (B) {
+    const ic = [icon[0] - rect[0], icon[1] - rect[1], icon[2] - rect[0], icon[3] - rect[1]];
+    const c = cutSprite(A, B, [0, 0, A.w, A.h], ic);
+    if (c) sprite = { url: c.url, w: c.w / s, h: c.h / s, ax: (icx - c.l) / s, ay: (icy - c.t) / s };
+    patch = { url: nativeImage.createFromBitmap(B.buf, { width: B.w, height: B.h }).toDataURL(), w: B.w / s, h: B.h / s, ax: icx / s, ay: icy / s };
   }
-  return A;
+  if (!sprite) sprite = { url: A.img.toDataURL(), w: A.w / s, h: A.h / s, ax: icx / s, ay: icy / s, opaque: true };
+  return { sprite, patch };
 }
 
-function backgroundFrom(B, display, workArea) {
-  const s = display.scaleFactor * B.k;
-  const l = Math.round((workArea.x - display.bounds.x) * s), t = Math.round((workArea.y - display.bounds.y) * s);
-  const w = Math.min(B.w - l, Math.round(workArea.width * s)), h = Math.min(B.h - t, Math.round(workArea.height * s));
-  const out = Buffer.alloc(w * h * 4);
-  for (let y = 0; y < h; y++) B.buf.copy(out, y * w * 4, ((t + y) * B.w + l) * 4, ((t + y) * B.w + l + w) * 4);
-  return nativeImage.createFromBitmap(out, { width: w, height: h }).toDataURL();
-}
-
-function parseScan(text) {
-  let vx = 0, vy = 0;
-  const rows = [];
-  for (const line of text.split(/\r?\n/)) {
-    const p = line.split('\t');
-    if (p[0] === 'VS') { vx = +p[1] || 0; vy = +p[2] || 0; }
-    else if (p[0] === 'IT' && p.length >= 13) {
-      rows.push({ idx: +p[1], pos: [+p[2], +p[3]], icon: p.slice(4, 8).map(Number), bounds: p.slice(8, 12).map(Number), name: p.slice(12).join('\t') });
-    }
+// Swallow, step 2 (background): Recycle Bin, then wait until Explorer has removed the icon
+async function trashIcon(name) {
+  const files = await desktopFiles();
+  const f = matchFile(name, files);
+  if (!f) return { ok: false, error: 'not a file' };
+  if (TEST_MODE && !/^crumby-test/i.test(name)) return { ok: false, error: 'test mode' };
+  try { await shell.trashItem(f.path); } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+  fileCache.at = 0;
+  log('trashed', name);
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 80));
+    if (!parseScan(await helperCmd('scan', 3000)).has(name)) return { ok: true };
   }
-  return { vx, vy, rows };
-}
-
-// capture: 'full' = photograph with + without icons (session start)
-//          'icons' = only re-photograph the icons (wallpaper kept)       | false = no photos
-// onlyNew: add just the icons that appeared since (dropped files), keeping current ids
-async function collectItems(workArea, display, { capture = false, onlyNew = false } = {}) {
-  const scale = display.scaleFactor;
-  const files = await listDesktopFiles();
-  const { vx, vy, rows: allRows } = parseScan(await helperCmd('scan'));
-  const known = new Set(itemMeta.map((m) => m.name));
-  const rows = onlyNew ? allRows.filter((r) => !known.has(r.name)) : allRows;
-  if (onlyNew && !rows.length) return [];
-
-  let A = null, B = null;
-  if (capture === 'full' && rows.length) {
-    A = await grabScreen(display);
-    await helperCmd('hide', 5000);                // a split second, just for the wallpaper photo
-    await new Promise((r) => setTimeout(r, 350));
-    B = A ? await grabScreen(display) : null;
-    await helperCmd('show', 5000);                // real icons back right away
-    if (!B || B.w !== A.w || B.h !== A.h) A = B = null;
-    wallpaperShot = B;
-  } else if (capture === 'icons' && rows.length && wallpaperShot) {
-    A = await grabWithIcons(display);
-    B = wallpaperShot;
-    if (!A || A.w !== B.w || A.h !== B.h) A = B = null;
-  }
-
-  // match listview labels to files (labels may hide extensions; .lnk/.url never show them)
-  const taken = new Set(onlyNew ? itemPaths.filter(Boolean) : []);
-  const pool = files.filter((f) => !taken.has(f.path));
-  const take = (label) => {
-    const lo = label.toLowerCase();
-    let i = pool.findIndex((f) => f.name.toLowerCase() === lo);
-    if (i < 0) i = pool.findIndex((f) => f.name.replace(/\.[^.]+$/, '').toLowerCase() === lo);
-    return i >= 0 ? pool.splice(i, 1)[0] : null;
-  };
-
-  // listview coords -> screen physical px (primary display starts at 0,0)
-  const ox = vx - display.bounds.x * scale, oy = vy - display.bounds.y * scale;
-  const items = [];
-  const onScreen = (x, y) => x >= -10 && y >= -10 && x <= workArea.width + 10 && y <= workArea.height + 10;
-  const mapped = rows.map((r) => ({
-    r,
-    x: ((r.icon[0] + r.icon[2]) / 2 + ox) / scale - (workArea.x - display.bounds.x),
-    y: ((r.icon[1] + r.icon[3]) / 2 + oy) / scale - (workArea.y - display.bounds.y),
-  }));
-  if (mapped.some((m) => onScreen(m.x, m.y))) {
-    // icons on other monitors are left alone
-    for (const m of mapped) {
-      if (!onScreen(m.x, m.y)) continue;
-      const f = take(m.r.name);
-      let sprite = null;
-      if (A && B) {
-        const k = A.k;
-        const pad = 3 * scale;
-        const rect = [m.r.bounds[0] + ox - pad, m.r.bounds[1] + oy - pad, m.r.bounds[2] + ox + pad, m.r.bounds[3] + oy + pad].map((v) => v * k);
-        const icon = [m.r.icon[0] + ox, m.r.icon[1] + oy, m.r.icon[2] + ox, m.r.icon[3] + oy].map((v) => v * k);
-        const cut = cutSprite(A, B, rect, icon);
-        if (cut) {
-          const icx = ((icon[0] + icon[2]) / 2), icy = ((icon[1] + icon[3]) / 2);
-          const s2 = scale * k;
-          sprite = { url: cut.url, w: cut.w / s2, h: cut.h / s2, ax: (icx - cut.l) / s2, ay: (icy - cut.t) / s2 };
-        }
-      }
-      items.push({ name: m.r.name, file: f, x: m.x, y: m.y, pos: m.r.pos, sprite,
-        iconSize: Math.max(24, Math.min(96, (m.r.icon[2] - m.r.icon[0]) / scale)) });
-    }
-  } else if (!onlyNew) {
-    // fallback: Windows default arrangement (column-major from top-left)
-    const cellW = 76, cellH = 100, rowsPer = Math.max(1, Math.floor((workArea.height - 10) / cellH));
-    files.forEach((f, i) => {
-      const col = Math.floor(i / rowsPer), row = i % rowsPer;
-      items.push({ name: f.name.replace(/\.(lnk|url)$/i, ''), file: f, x: 8 + col * cellW + cellW / 2, y: 6 + row * cellH + 26, iconSize: 48 });
-    });
-  }
-
-  const out = [];
-  if (!onlyNew) { itemPaths = []; itemMeta = []; }
-  for (const it of items) {
-    const id = itemPaths.length;
-    itemPaths.push(it.file ? it.file.path : null);
-    itemMeta.push({ name: it.name, pos: it.pos || null, x: it.x, y: it.y, scale });
-    out.push({
-      id,
-      canTrash: !!it.file,
-      name: it.name,
-      x: it.x, y: it.y, iconSize: it.iconSize,
-      size: it.file ? it.file.size : 0,
-      kind: kindOf(it.file),
-      sprite: it.sprite,
-      icon: !it.sprite && it.file ? await iconFor(it.file) : null,
-    });
-  }
-  return out;
-}
-
-// ---------- files dragged onto the desktop while Crumby is open ----------
-// The overlay steps aside (click-through) so Windows itself receives the drop, exactly where the
-// user lets go. Once the mouse button is released, the new icon is photographed and added.
-let passthrough = false;
-async function letDropThrough(positions) {
-  if (!win || passthrough) return;
-  passthrough = true;
-  win.setIgnoreMouseEvents(true);
-  // real icons go where the user sees them first, so nothing gets dropped into the wrong folder
-  await applyMoves(positions);
-  const t0 = Date.now();
-  let sawDown = false;
-  while (Date.now() - t0 < 30000) {
-    await new Promise((r) => setTimeout(r, 120));
-    const down = (await helperCmd('mouse', 1500)).trim().startsWith('1');
-    if (down) sawDown = true;
-    else if (sawDown || Date.now() - t0 > 1500) break;
-  }
-  if (win) win.setIgnoreMouseEvents(false);
-  passthrough = false;
-  // Explorer needs a moment to create the icon(s)
-  for (let tries = 0; tries < 8 && win && session; tries++) {
-    await new Promise((r) => setTimeout(r, 350));
-    const added = await collectItems(session.wa, screen.getPrimaryDisplay(), { capture: 'icons', onlyNew: true });
-    if (added.length) { if (win) win.webContents.send('crumby:added', added); break; }
-  }
-}
-
-// apply the overlay positions of icons the user (or the vacuum) moved to the real desktop
-async function applyMoves(list) {
-  if (!Array.isArray(list)) return;
-  for (const m of list) {
-    const meta = itemMeta[m.id];
-    if (!meta || !meta.pos || trashed.has(m.id)) continue;
-    const dx = Math.round((m.x - meta.x) * meta.scale), dy = Math.round((m.y - meta.y) * meta.scale);
-    if (Math.abs(dx) < 2 && Math.abs(dy) < 2) continue;
-    const nx = Math.max(0, meta.pos[0] + dx), ny = Math.max(0, meta.pos[1] + dy);
-    await helperCmd(`move\t${meta.name}\t${nx}\t${ny}`, 3000);
-    meta.pos = [nx, ny]; meta.x = m.x; meta.y = m.y;
-  }
+  await helperCmd('refresh', 2000); // Explorer missed it: F5
+  return { ok: true };
 }
 
 // ---------- settings (userData/settings.json) ----------
@@ -374,22 +367,6 @@ function loadSettings() {
 }
 function saveSettings() {
   try { fs.mkdirSync(path.dirname(SETTINGS_FILE()), { recursive: true }); fs.writeFileSync(SETTINGS_FILE(), JSON.stringify(settings, null, 2)); } catch (e) {}
-}
-
-// ---------- recycle bin ----------
-let itemPaths = [];
-let trashed = new Set();
-async function trashItem(id) {
-  const p = itemPaths[id];
-  if (!p) return { ok: false, error: 'not a file' };
-  if (trashed.has(id)) return { ok: true };
-  try {
-    await shell.trashItem(p);
-    trashed.add(id);
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: String(e && e.message || e) };
-  }
 }
 
 // ---------- desktop right-click menu (per user, no admin needed) ----------
@@ -419,19 +396,17 @@ function setStartAtLogin(on) {
   try { app.setLoginItemSettings({ openAtLogin: !!on, path: process.execPath, args: ['--background'] }); } catch (e) {}
 }
 
-// ---------- cleaning sessions ----------
-let session = null; // { items, wa }
+// ---------- the robot's window ----------
+let session = null;
 let closing = false;
 
 async function startSession() {
-  if (win) { win.show(); win.focus(); return; }
-  if (session) return; // already opening
+  if (win) { win.show(); return; }
+  if (session) return;
   closing = false;
-  const display = screen.getPrimaryDisplay();
-  const wa = display.workArea; // excludes the taskbar
-  session = { wa, items: [] };
-  if (!helper) startHelper();
-  trashed = new Set();
+  const wa = screen.getPrimaryDisplay().workArea; // never covers the taskbar
+  session = { wa };
+  startHelper();
 
   win = new BrowserWindow({
     x: wa.x, y: wa.y, width: wa.width, height: wa.height,
@@ -442,26 +417,19 @@ async function startSession() {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, backgroundThrottling: false },
   });
   win.setMenu(null);
+  // clicks, drags and drops go straight to the real desktop, except where the renderer says otherwise
+  win.setIgnoreMouseEvents(true, { forward: true });
   win.on('closed', () => { win = null; endSession(); });
-
-  if (helper) { await helperCmd('minall', 4000); await new Promise((r) => setTimeout(r, 650)); } // bring the desktop into view
-  itemMeta = []; itemPaths = []; wallpaperShot = null;
-  session.items = await collectItems(wa, display, { capture: 'full' });
-  session.bg = wallpaperShot ? backgroundFrom(wallpaperShot, display, wa) : null;
-  try { win.setContentProtection(true); } catch (e) {} // our window never shows up in our own screenshots
+  win.webContents.on('console-message', (e, level, message, line, src) => log('renderer', level, message, (src || '').split('/').pop() + ':' + line));
+  win.webContents.on('render-process-gone', (e, d) => log('renderer gone', d));
+  log('session start', wa);
   await win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-  globalShortcut.register('Escape', () => { if (win) win.webContents.send('crumby:esc'); else endSession(); });
   updateTrayMenu();
 }
 
-// closes the cleaning window, shows the real desktop again, keeps Crumby in the tray
-async function endSession(moves) {
+async function endSession() {
   if (closing) return;
   closing = true;
-  globalShortcut.unregister('Escape');
-  if (moves) await applyMoves(moves);
-  await helperCmd('show', 3000);
-  await helperCmd('undomin', 3000);
   if (win && !win.isDestroyed()) { const w = win; win = null; w.destroy(); }
   session = null;
   closing = false;
@@ -473,49 +441,23 @@ async function endSession(moves) {
 }
 
 ipcMain.handle('crumby:init', () => ({
-  items: session ? session.items : [],
   width: session ? session.wa.width : 0, height: session ? session.wa.height : 0,
-  dock: settings.dock || null,
-  bg: session ? session.bg : null,
+  dock: settings.dock || null, testMode: TEST_MODE, windows: process.platform === 'win32',
 }));
-ipcMain.on('crumby:ready', async () => {
+ipcMain.on('crumby:ready', () => {
+  log('ready');
   if (!win) return;
-  win.show();
-  win.focus();
-  // with a wallpaper photo as background the real icons stay alive underneath;
-  // without one (photo failed) they have to be hidden instead
-  if (!session || !session.bg) await helperCmd('hide', 5000);
+  helperCmd('refresh', 2000); // clears any stale icon Explorer kept around
+  win.show(); // (showInactive leaves transparent windows grey on some Windows setups)
+  scanLoop();
 });
-ipcMain.on('crumby:dragIn', (e, positions) => letDropThrough(positions));
-ipcMain.on('crumby:quit', (e, moves) => endSession(moves));
-ipcMain.handle('crumby:trash', (e, id) => trashItem(id));
-// "Start" after a run: look at the desktop again (new files saved since then)
-ipcMain.handle('crumby:rescan', async (e, moves) => {
-  if (!session) return { items: [] };
-  const display = screen.getPrimaryDisplay();
-  // put moved icons where the user left them, then photograph the desktop again without our window
-  await applyMoves(moves);
-  trashed = new Set();
-  itemMeta = []; itemPaths = [];
-  session.items = await collectItems(session.wa, display, { capture: session.bg ? 'icons' : false });
-  return { items: session.items };
-});
-ipcMain.handle('crumby:open', async (e, id) => {
-  const p = itemPaths[id];
-  if (!p) return false;
-  return (await shell.openPath(p)) === '';
-});
-ipcMain.handle('crumby:itemMenu', (e, id, protectedNow) => new Promise((resolve) => {
-  const p = itemPaths[id];
-  let choice = null;
-  const menu = Menu.buildFromTemplate([
-    { label: 'Abrir', enabled: !!p, click: () => { choice = 'open'; shell.openPath(p); } },
-    { label: 'Mostrar na pasta', enabled: !!p, click: () => { choice = 'reveal'; shell.showItemInFolder(p); } },
-    { type: 'separator' },
-    { label: 'Não limpar este item', type: 'checkbox', checked: !!protectedNow, enabled: !!p, click: (m) => { choice = m.checked ? 'protect' : 'unprotect'; } },
-  ]);
-  menu.popup({ window: win || undefined, callback: () => setTimeout(() => resolve(choice), 0) });
-}));
+ipcMain.on('crumby:quit', () => endSession());
+ipcMain.on('crumby:interactive', (e, on) => { if (win) win.setIgnoreMouseEvents(!on, { forward: true }); });
+ipcMain.on('crumby:move', (e, list) => { moveIcons(list); });
+ipcMain.handle('crumby:lift', (e, name) => liftIcon(name));
+ipcMain.handle('crumby:trash', (e, name) => trashIcon(name));
+ipcMain.handle('crumby:wallpaper', () => takeWallpaper());
+ipcMain.on('crumby:refresh', () => { helperCmd('refresh', 2000); });
 ipcMain.on('crumby:saveDock', (e, pos) => {
   if (pos && isFinite(pos.x) && isFinite(pos.y)) { settings.dock = { x: Math.round(pos.x), y: Math.round(pos.y) }; saveSettings(); }
 });
@@ -539,7 +481,7 @@ function updateTrayMenu() {
 function createTray() {
   try {
     tray = new Tray(trayIcon());
-    tray.setToolTip('Crumby');
+    tray.setToolTip(TEST_MODE ? 'Crumby (modo de teste)' : 'Crumby');
     tray.on('click', () => startSession());
     tray.on('double-click', () => startSession());
     updateTrayMenu();
@@ -548,7 +490,6 @@ function createTray() {
 
 async function quitApp() {
   await endSession();
-  globalShortcut.unregisterAll();
   if (helper) { try { helper.stdin.end(); } catch (e) {} }
   if (tray) { tray.destroy(); tray = null; }
   app.exit(0);
@@ -556,13 +497,31 @@ async function quitApp() {
 
 // ---------- app ----------
 app.on('second-instance', (e, argv) => {
-  // right-click menu or a second double-click while Crumby lives in the tray
   if (!argv.includes('--background')) startSession();
 });
 app.on('window-all-closed', () => { /* stay in the tray */ });
 
+// test mode: restart by itself when its files are replaced (makes testing on a real PC quick)
+function watchForUpdates() {
+  if (!TEST_MODE) return;
+  const files = ['main.js', 'preload.js', 'desktop-helper.ps1', 'renderer/app.js', 'renderer/index.html', 'renderer/style.css'];
+  let timer = null;
+  for (const f of files) {
+    fs.watchFile(path.join(__dirname, f), { interval: 1000 }, () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (helper) { try { helper.stdin.end(); } catch (e) {} }
+        app.relaunch({ args: process.argv.slice(1).filter((a) => a !== '--background') });
+        app.exit(0);
+      }, 1500);
+    });
+  }
+}
+
 app.whenReady().then(async () => {
+  log('start', process.argv, app.getPath('desktop'));
   loadSettings();
+  watchForUpdates();
   if (process.argv.includes('--uninstall')) {
     await unregisterContextMenu();
     try { app.setLoginItemSettings({ openAtLogin: false, path: process.execPath, args: ['--background'] }); } catch (e) {}
@@ -570,7 +529,7 @@ app.whenReady().then(async () => {
     app.exit(0);
     return;
   }
-  registerContextMenu(); // refreshed on every launch so it always points at this copy
+  registerContextMenu();
   if (settings.startAtLogin === undefined) setStartAtLogin(true);
   else setStartAtLogin(settings.startAtLogin);
   createTray();

@@ -4,3 +4,5 @@ dist/
 launcher/payload.zip
 launcher/*.syso
 *.exe
+test-mode
+debug.log
