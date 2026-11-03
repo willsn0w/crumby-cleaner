@@ -281,8 +281,8 @@ function refreshConfirm() {
   $('confirmText').innerHTML = c.length
     ? `<b>${c.length} ${c.length === 1 ? 'item' : 'items'}</b> (${fmtBytes(tb)}) will be moved to the <b>Recycle Bin</b>. You can restore them from there.`
       + (S.testMode ? '<br><span class="test">Test mode: only files named crumby-test… are cleaned.</span>' : '')
-    : 'Your desktop is already clean.';
-  $('startBtn').disabled = !c.length;
+    : 'Your desktop already looks clean. Crumby can still sweep it and head back to the dock.';
+  $('startBtn').disabled = false; // never forbid a sweep, even with nothing to collect
 }
 function loadOf(it) {
   return 0.5 / Math.max(1, S.N0) + 0.5 * (S.B0 > 0 ? Math.min(1, it.size / S.B0) : 1 / Math.max(1, S.N0));

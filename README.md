@@ -3,7 +3,7 @@
 # Crumby
 
 > [!NOTE]
-> **Versão 1.5.3 — já está bastante funcional, e testada num Windows 11 de verdade.** O Crumby agora vive na sua área de trabalho como um bichinho de estimação (no estilo Desktop Goose e Shimeji): a área de trabalho do Windows continua funcionando normalmente por baixo dele, e tudo o que ele engole vai para a Lixeira.
+> **Versão 1.5.4 — já está bastante funcional, e testada num Windows 11 de verdade.** O Crumby agora vive na sua área de trabalho como um bichinho de estimação (no estilo Desktop Goose e Shimeji): a área de trabalho do Windows continua funcionando normalmente por baixo dele, e tudo o que ele engole vai para a Lixeira.
 
 Um robô aspirador que limpa a sua área de trabalho do Windows de verdade. Ele sai da base, mapeia a tela com um laser, vai até os ícones um por um e **cada ícone que ele engole vai para a Lixeira do Windows**. Volta para a base quando o compartimento enche, se esvazia e termina com tudo limpo.
 
@@ -51,6 +51,9 @@ Quando você fecha o Crumby (Esc, Cancel ou a bolinha vermelha), ele continua ro
 - **Sons** sintetizados (escaneamento, motor, sucção, bipes, esvaziamento), com botão de mudo.
 
 ## Versões
+
+### 1.5.4
+- O botão **Start cleaning** nunca fica bloqueado: mesmo sem nada para limpar (só a Lixeira ou o próprio Crumby na área de trabalho), o robô sai, faz a varredura e volta para a base. O painel avisa que a área de trabalho já parece limpa.
 
 ### 1.5.3
 - Corrigido: depois de um ciclo completo, arrastar a base ou o robô deixava um tracinho azul no minimapa (o rastro da última rodada, que antes ficava escondido embaixo do robô). Agora o rastro antigo é apagado quando o robô ou a base são movidos com o ciclo já terminado.
