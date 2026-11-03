@@ -3,7 +3,7 @@
 # Crumby
 
 > [!NOTE]
-> **Versão 1.5 — já está bastante funcional, e testada num Windows 11 de verdade.** O Crumby agora vive na sua área de trabalho como um bichinho de estimação (no estilo Desktop Goose e Shimeji): a área de trabalho do Windows continua funcionando normalmente por baixo dele, e tudo o que ele engole vai para a Lixeira.
+> **Versão 1.5.2 — já está bastante funcional, e testada num Windows 11 de verdade.** O Crumby agora vive na sua área de trabalho como um bichinho de estimação (no estilo Desktop Goose e Shimeji): a área de trabalho do Windows continua funcionando normalmente por baixo dele, e tudo o que ele engole vai para a Lixeira.
 
 Um robô aspirador que limpa a sua área de trabalho do Windows de verdade. Ele sai da base, mapeia a tela com um laser, vai até os ícones um por um e **cada ícone que ele engole vai para a Lixeira do Windows**. Volta para a base quando o compartimento enche, se esvazia e termina com tudo limpo.
 
@@ -51,6 +51,12 @@ Quando você fecha o Crumby (Esc, Cancel ou a bolinha vermelha), ele continua ro
 - **Sons** sintetizados (escaneamento, motor, sucção, bipes, esvaziamento), com botão de mudo.
 
 ## Versões
+
+### 1.5.2
+- Corrigido: uma travadinha depois de cada sucção. O Crumby agora fotografa os próximos ícones com antecedência, enquanto o robô ainda está longe, e o robô não para mais esperando a foto (medido no Windows: 1–3 ms por ícone, nenhum quadro travado durante a limpeza).
+- Corrigido: todos os ícones piscavam ao clicar em **Start**. Durante a foto do papel de parede, o Crumby cobre a tela com uma foto idêntica dela mesma, então nada pisca.
+- Corrigido: tela preta por uns 2 segundos ao abrir o Crumby. A janela só aparece depois de desenhar o primeiro quadro.
+- O atalho `Crumby.exe` da área de trabalho abre sempre o Crumby instalado mais novo.
 
 ### 1.5.1
 - Corrigido: depois da primeira limpeza, um arquivo novo solto na área de trabalho não era limpo ao clicar em **Start** (o robô saía e voltava). O Windows deixa o arquivo solto selecionado, e o robô ignorava ícones selecionados; agora ele só deixa em paz o ícone que você está segurando com o mouse.

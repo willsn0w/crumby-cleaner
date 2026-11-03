@@ -235,11 +235,11 @@ async function grabScreen(display) {
 
 // the robot hides from screen capture only for these few milliseconds, so screenshots and
 // screen recordings of Crumby work normally the rest of the time
-async function grab(rect) {
+async function grab(rect, protect = false) {
   const [l, t, r, b] = rect.map(Math.round);
-  if (win) { try { win.setContentProtection(true); } catch (e) {} await new Promise((res) => setTimeout(res, 70)); }
+  if (protect && win) { try { win.setContentProtection(true); } catch (e) {} await new Promise((res) => setTimeout(res, 70)); }
   const out = await helperCmd(`grab\t${l}\t${t}\t${r - l}\t${b - t}`, 4000);
-  if (win) { try { win.setContentProtection(false); } catch (e) {} }
+  if (protect && win) { try { win.setContentProtection(false); } catch (e) {} }
   const line = out.split(/\r?\n/).find((x) => x.startsWith('PNG\t'));
   if (!line) return null;
   const img = nativeImage.createFromBuffer(Buffer.from(line.slice(4), 'base64'));
@@ -294,16 +294,54 @@ function cutSprite(A, B, rect, icon) {
 let wallpaper = null;
 async function takeWallpaper() {
   const d = screen.getPrimaryDisplay();
+  // 1. a photo of the screen as it is, shown by the renderer as a frozen cover (robot kept still)
+  const now = await grabScreen(d);
+  let covered = false;
+  if (now && win) {
+    const g = geo();
+    const l = Math.round(g.wa.x * g.s * now.k), t = Math.round(g.wa.y * g.s * now.k);
+    const w = Math.min(now.w - l, Math.round(g.wa.width * g.s * now.k)), h = Math.min(now.h - t, Math.round(g.wa.height * g.s * now.k));
+    const buf = Buffer.alloc(w * h * 4);
+    for (let y = 0; y < h; y++) now.buf.copy(buf, y * w * 4, ((t + y) * now.w + l) * 4, ((t + y) * now.w + l + w) * 4);
+    const url = nativeImage.createFromBitmap(buf, { width: w, height: h }).toDataURL();
+    covered = await new Promise((res) => {
+      const t0 = setTimeout(() => res(false), 2500);
+      ipcMain.once('crumby:covered', () => { clearTimeout(t0); res(true); });
+      win.webContents.send('crumby:cover', url);
+    });
+  }
+  // 2. behind the cover: icons away, photo of the bare wallpaper, icons back
   if (win) { try { win.setContentProtection(true); } catch (e) {} }
   await helperCmd('hide', 3000);
   await new Promise((r) => setTimeout(r, 160));
   const shot = await grabScreen(d);
   await helperCmd('show', 3000);
+  await new Promise((r) => setTimeout(r, 120)); // let Explorer repaint the icons
   if (win) { try { win.setContentProtection(false); } catch (e) {} }
+  if (covered && win) win.webContents.send('crumby:uncover');
   if (shot) wallpaper = shot;
-  log('wallpaper', shot ? `${shot.w}x${shot.h} k=${shot.k}` : 'failed');
+  log('wallpaper', shot ? `${shot.w}x${shot.h} k=${shot.k}` : 'failed', 'covered', covered);
   return !!shot;
 }
+
+// photos of icons taken ahead of time, while the robot is still far away (no capture tricks needed)
+const prefetched = new Map(); // name -> { A, rect, icon }
+function iconRects(r, g) {
+  const pad = Math.round(4 * g.s);
+  return {
+    rect: [r.bounds[0] + g.ox - pad, r.bounds[1] + g.oy - pad, r.bounds[2] + g.ox + pad, r.bounds[3] + g.oy + pad],
+    icon: [r.icon[0] + g.ox, r.icon[1] + g.oy, r.icon[2] + g.ox, r.icon[3] + g.oy],
+  };
+}
+async function prefetchIcon(name) {
+  const r = rows.get(name);
+  if (!r) return false;
+  const { rect, icon } = iconRects(r, geo());
+  const A = await grab(rect, false);
+  if (A) prefetched.set(name, { A, rect, icon });
+  return !!A;
+}
+
 function wallpaperCrop(rect) {
   const B = wallpaper;
   if (!B) return null;
@@ -318,14 +356,21 @@ function wallpaperCrop(rect) {
 // Swallow, step 1 (fast): photo of the icon, cut out against the wallpaper photo. The renderer starts
 // the animation at once and covers the real icon with the matching piece of wallpaper.
 async function liftIcon(name) {
+  const t0 = Date.now();
+  try { return await liftIconInner(name); } finally { log('lift', name, (Date.now() - t0) + 'ms', 'prefetched', !!liftUsedPre); }
+}
+let liftUsedPre = false;
+async function liftIconInner(name) {
   const r = rows.get(name);
   if (!r) return null;
   if (!wallpaper) await takeWallpaper();
   const g = geo();
-  const pad = Math.round(4 * g.s);
-  const rect = [r.bounds[0] + g.ox - pad, r.bounds[1] + g.oy - pad, r.bounds[2] + g.ox + pad, r.bounds[3] + g.oy + pad];
-  const icon = [r.icon[0] + g.ox, r.icon[1] + g.oy, r.icon[2] + g.ox, r.icon[3] + g.oy];
-  const A = await grab(rect);
+  const pre = prefetched.get(name);
+  prefetched.delete(name);
+  liftUsedPre = !!pre;
+  // the photo taken ahead of time (icon + wallpaper where the icon was); else a protected photo now
+  const { rect, icon } = pre || iconRects(r, g);
+  const A = pre ? pre.A : await grab(rect, true);
   if (!A) return null;
   let B = wallpaperCrop(rect);
   if (B && (B.w !== A.w || B.h !== A.h)) B = null;
@@ -336,7 +381,10 @@ async function liftIcon(name) {
     const ic = [icon[0] - rect[0], icon[1] - rect[1], icon[2] - rect[0], icon[3] - rect[1]];
     const c = cutSprite(A, B, [0, 0, A.w, A.h], ic);
     if (c) sprite = { url: c.url, w: c.w / s, h: c.h / s, ax: (icx - c.l) / s, ay: (icy - c.t) / s };
-    patch = { url: nativeImage.createFromBitmap(B.buf, { width: B.w, height: B.h }).toDataURL(), w: B.w / s, h: B.h / s, ax: icx / s, ay: icy / s };
+    const nowR = iconRects(r, g);
+    const P = wallpaperCrop(nowR.rect) || B;
+    const pcx = (nowR.icon[0] + nowR.icon[2]) / 2 - nowR.rect[0], pcy = (nowR.icon[1] + nowR.icon[3]) / 2 - nowR.rect[1];
+    patch = { url: nativeImage.createFromBitmap(P.buf, { width: P.w, height: P.h }).toDataURL(), w: P.w / s, h: P.h / s, ax: pcx / s, ay: pcy / s };
   }
   if (!sprite) sprite = { url: A.img.toDataURL(), w: A.w / s, h: A.h / s, ax: icx / s, ay: icy / s, opaque: true };
   return { sprite, patch };
@@ -448,7 +496,15 @@ ipcMain.on('crumby:ready', () => {
   log('ready');
   if (!win) return;
   helperCmd('refresh', 2000); // clears any stale icon Explorer kept around
+  // first shown off-screen: Windows paints a new transparent window black until its first frame,
+  // so it moves into place only once the renderer has painted (no black flash)
+  const wa = session.wa;
+  win.setBounds({ x: wa.x - 20000, y: wa.y, width: wa.width, height: wa.height });
   win.show(); // (showInactive leaves transparent windows grey on some Windows setups)
+  let placed = false;
+  const place = () => { if (placed || !win) return; placed = true; win.setBounds({ x: wa.x, y: wa.y, width: wa.width, height: wa.height }); };
+  ipcMain.once('crumby:painted', () => setTimeout(place, 50));
+  setTimeout(place, 900);
   scanLoop();
 });
 ipcMain.on('crumby:quit', () => endSession());
@@ -457,6 +513,7 @@ ipcMain.on('crumby:move', (e, list) => { moveIcons(list); });
 ipcMain.handle('crumby:lift', (e, name) => liftIcon(name));
 ipcMain.handle('crumby:trash', (e, name) => trashIcon(name));
 ipcMain.handle('crumby:wallpaper', () => takeWallpaper());
+ipcMain.handle('crumby:prefetch', (e, name) => prefetchIcon(name));
 ipcMain.on('crumby:refresh', () => { helperCmd('refresh', 2000); });
 ipcMain.on('crumby:saveDock', (e, pos) => {
   if (pos && isFinite(pos.x) && isFinite(pos.y)) { settings.dock = { x: Math.round(pos.x), y: Math.round(pos.y) }; saveSettings(); }

@@ -107,7 +107,7 @@ const S = {
   battery: 100, binLoad: 0, collected: 0, bytes: 0, elapsed: 0, running: false,
   paused: false, muted: false, testMode: false,
   target: null, strain: null, busy: null, flash: null, near: 0, mouseDown: false,
-  trail: [], drag: null, time: 0, spits: [], patches: [],
+  trail: [], drag: null, time: 0, spits: [], patches: [], cover: null, wallpaperBusy: false,
 };
 const byName = new Map();
 
@@ -296,7 +296,10 @@ function startRun() {
   S.collected = 0; S.bytes = 0; S.elapsed = 0; S.trail = [];
   S.mapped = false; S.homeReason = null; S.target = null; S.strain = null; S.running = true;
   S.items.forEach((i) => { i.revealed = false; });
-  if (!PREVIEW) window.crumby.wallpaper(); // the bare wallpaper, for clean cut-outs
+  if (!PREVIEW) { // the bare wallpaper, for clean cut-outs (robot waits on the dock meanwhile)
+    S.wallpaperBusy = true;
+    window.crumby.wallpaper().finally(() => { S.wallpaperBusy = false; });
+  }
   Snd.init(); setState('boot'); S.stateT = 1.0;
   recount();
 }
@@ -391,6 +394,32 @@ function finishSuck(it) {
   if (it.trashed) countIt(it);
 }
 
+function clearOfUs(it) {
+  const b = it.box, r = S.robot, m = 14;
+  const L = it.x + b[0] - m, T = it.y + b[1] - m, Rr = it.x + b[2] + m, B = it.y + b[3] + m;
+  const cx = clamp(r.x, L, Rr), cy = clamp(r.y, T, B);
+  if (Math.hypot(r.x - cx, r.y - cy) < R + 24) return false;                         // robot
+  if (Rr > S.dock.x && L < S.dock.x + DOCK_W && B > S.dock.y && T < S.dock.y + DOCK_H) return false; // dock
+  const p = $('panel').getBoundingClientRect();
+  if (Rr > p.left && L < p.right && B > p.top && T < p.bottom) return false;          // panel
+  for (const q of S.patches) if (Math.abs(q.x - it.x) < 90 && Math.abs(q.y - it.y) < 110) return false;
+  for (const sp of S.spits) if (Math.hypot(sp.tx - it.x, sp.ty - it.y) < 120) return false;
+  return true;
+}
+function prefetchAhead() {
+  let n = 0;
+  const list = S.items.filter((i) => candidate(i) && i.revealed && !i.pref)
+    .sort((a, b) => Math.hypot(a.x - S.robot.x, a.y - S.robot.y) - Math.hypot(b.x - S.robot.x, b.y - S.robot.y));
+  for (const it of list) {
+    if (n++ >= 3) break;
+    if (!clearOfUs(it)) continue;
+    if (it.prefAt == null) { it.glow = 0; it.prefAt = S.time + 0.06; continue; } // let the glow vanish from screen first
+    if (S.time < it.prefAt) continue;
+    it.pref = true;
+    window.crumby.prefetch(it.name).then((ok) => { if (!ok) { it.pref = false; it.prefAt = null; } });
+  }
+}
+
 function revealSweep() {
   const r = S.robot;
   for (const it of S.items) {
@@ -413,7 +442,7 @@ function update(dt) {
     case 'confirm':
       break;
     case 'boot':
-      if (S.stateT > 1.1) { Snd.init(); Snd.chirp(true); S.running = true; setState('undock'); }
+      if (S.stateT > 1.1 && !S.wallpaperBusy) { Snd.init(); Snd.chirp(true); S.running = true; setState('undock'); }
       break;
     case 'undock': {
       const ap = approachPos();
@@ -432,7 +461,7 @@ function update(dt) {
       break;
     }
     case 'cleaning': {
-      if (S.strain || S.busy) { r.moving = false; break; } // swallowing
+      if (S.strain) { r.moving = false; break; } // a big file: halt and strain (small ones: keep rolling)
       if (!S.target || !candidate(S.target)) S.target = pickTarget();
       if (!S.target) {
         if (!S.items.some((i) => candidate(i) || i.st === 'busy' || i.st === 'suck' || i.st === 'sucked')) goHome('done');
@@ -442,7 +471,7 @@ function update(dt) {
       break;
     }
     case 'home': {
-      if (S.strain || S.busy) break;
+      if (S.strain) break;
       const ap = approachPos();
       if (driveTo(ap.x, ap.y, dt, SPEED, 4)) setState('align');
       break;
@@ -539,6 +568,8 @@ function update(dt) {
   for (const sp of S.spits) sp.t += dt / 0.45;
   S.spits = S.spits.filter((sp) => sp.t < 1);
 
+  if (!PREVIEW && ['cleaning', 'home'].includes(S.state)) prefetchAhead();
+
   if (S.state === 'cleaning' && binPct() >= 100 && !S.strain && !S.busy) goHome('bin');
 
   // trail
@@ -552,7 +583,7 @@ function update(dt) {
   if (S.running && !['done', 'stopped', 'halted'].includes(S.state)) S.elapsed += dt;
   r.brush += dt * (r.moving || S.state === 'mapping' || S.strain || S.busy ? 16 : 0);
 
-  const motorLevel = S.state === 'lifted' ? 0.35 : (S.strain || S.busy ? 1.2 : (r.moving ? 1 : (S.state === 'mapping' ? 0.45 : 0)));
+  const motorLevel = S.state === 'lifted' ? 0.35 : (S.strain ? 1.2 : (r.moving ? 1 : (S.state === 'mapping' ? 0.45 : 0)));
   Snd.motor(motorLevel, S.strain ? 1 : 0, suctionOn ? S.near : 0);
 }
 
@@ -713,6 +744,7 @@ function drawRobot() {
 function draw() {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.clearRect(0, 0, W, H);
+  if (S.cover) ctx.drawImage(S.cover, 0, 0, W, H); // frozen photo while the wallpaper is photographed
   if (PREVIEW) for (const it of S.items) if (it.st === 'floor' && it.sprite) drawItem(it); // fake desktop for previews
   drawDock();
   for (const p of S.patches) ctx.drawImage(p.canvas, p.x - p.ax, p.y - p.ay, p.w, p.h); // real icon on its way out
@@ -971,7 +1003,15 @@ async function setup() {
     onScan({ items: mockItems().map((m) => ({ ...m, canTrash: m.kind !== 'system', box: [-36, -26, 36, 46] })), mouseDown: false });
   } else {
     window.crumby.onScan(onScan);
+    window.crumby.onCover(async (url) => {
+      const img = await loadImg(url);
+      if (!img) return;
+      S.cover = img;
+      requestAnimationFrame(() => requestAnimationFrame(() => window.crumby.covered())); // on screen now
+    });
+    window.crumby.onUncover(() => { S.cover = null; });
     window.crumby.ready();
+    paintedAfter = 3; // the window is moved on screen only after it has really painted
   }
   refreshConfirm();
   last = performance.now();
@@ -979,9 +1019,12 @@ async function setup() {
 }
 
 // ---------- loop ----------
-let last = 0;
+let last = 0, paintedAfter = -1;
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (paintedAfter > 0 && --paintedAfter === 0 && !PREVIEW) window.crumby.painted();
+  const raw = now - last;
+  if (S.testMode && S.running && raw > 40) console.log('hitch', Math.round(raw) + 'ms', S.state, S.busy ? 'busy' : '', S.strain ? 'strain' : '');
+  const dt = Math.min(0.05, raw / 1000); last = now;
   if (!S.paused) update(dt);
   draw();
   updatePanel(dt);
